@@ -1,15 +1,20 @@
 package build
-import mill._, scalalib._
+
+import mill._
+import scalalib._
 
 object sls extends ScalaModule {
   def scalaVersion = "3.6.4"
-  // def ivyDeps = Agg()
+
+  def ivyDeps = Agg(
+    ivy"tech.neander::langoustine-app::0.0.21"
+  )
   def scalacOptions = Seq(
     "-Wunused:all"
   )
 
   object test extends ScalaTests {
-    def ivyDeps = Agg(ivy"com.lihaoyi::utest:0.8.5")
+    def ivyDeps       = Agg(ivy"com.lihaoyi::utest:0.8.5")
     def testFramework = "utest.runner.Framework"
   }
 }
