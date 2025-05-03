@@ -20,7 +20,7 @@ object MyServer extends LangoustineApp.Simple:
         val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
         val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
         sendMessage(in.toClient, "ready to initialise!") *>
-          importBsp(rootPath, in.toClient) *>
+          importMillBsp(rootPath, in.toClient) *>
           IO {
             InitializeResult(
               capabilities = ServerCapabilities(textDocumentSync = Opt(TextDocumentSyncKind.Full)),
@@ -35,27 +35,25 @@ object MyServer extends LangoustineApp.Simple:
         }
       }
 
-  def importBsp(rootPath: os.Path, back: Communicate[IO]) =
-    val alreadyInstalled = os.exists(rootPath / ".bloop")
-    if !alreadyInstalled then
-      ProcessBuilder("./mill", "mill.bsp.BSP/install")
-        .withWorkingDirectory(fs2.io.file.Path.fromNioPath(rootPath.toNIO))
-        .spawn[IO]
-        .use { process =>
-          val logStdout = process.stdout
-          val logStderr = process.stderr
+  def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
+    val millExec = "./mill" // TODO if mising then findMillExec()
+    ProcessBuilder(millExec, "--import", "ivy:com.lihaoyi::mill-contrib-bloop:", "mill.contrib.bloop.Bloop/install")
+      .withWorkingDirectory(fs2.io.file.Path.fromNioPath(rootPath.toNIO))
+      .spawn[IO]
+      .use { process =>
+        val logStdout = process.stdout
+        val logStderr = process.stderr
 
-          val allOutput = logStdout
-            .merge(logStderr)
-            .through(text.utf8.decode)
-            .through(text.lines)
+        val allOutput = logStdout
+          .merge(logStderr)
+          .through(text.utf8.decode)
+          .through(text.lines)
 
-          allOutput
-            .evalMap(s => logMeesage(back, s))
-            .compile
-            .drain
-        }
-    else IO.unit
+        allOutput
+          .evalMap(s => logMeesage(back, s))
+          .compile
+          .drain
+      }
 
   def sendMessage(back: Communicate[IO], msg: String) =
     back.notification(
