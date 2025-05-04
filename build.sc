@@ -2,17 +2,10 @@ import mill._
 import mill.define.Sources
 import scalalib._
 
-import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.17.4`
+import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.18.34`
 import _root_.smithy4s.codegen.mill._
 
-trait SharedJarClasspath extends ScalaModule {
-
-  override def unmanagedClasspath = T {
-    os.list(os.pwd / "lib").filter(_.ext == "jar").map(PathRef(_))
-  }
-}
-
-object sls extends ScalaModule with SharedJarClasspath {
+object sls extends ScalaModule {
 
   def scalaVersion = "3.6.4"
   def moduleDeps   = Seq(bspJsonRpc)
@@ -27,7 +20,7 @@ object sls extends ScalaModule with SharedJarClasspath {
     "-Wunused:all"
   )
 
-  object test extends Tests {
+  object test extends ScalaTests {
     def ivyDeps = Agg(
       ivy"com.disneystreaming::weaver-cats:0.8.4"
     )
@@ -35,7 +28,7 @@ object sls extends ScalaModule with SharedJarClasspath {
   }
 }
 
-object bspJsonRpc extends ScalaModule with Smithy4sModule with SharedJarClasspath {
+object bspJsonRpc extends ScalaModule with Smithy4sModule {
 
   def scalaVersion = "3.6.4"
 
@@ -52,6 +45,7 @@ object bspJsonRpc extends ScalaModule with Smithy4sModule with SharedJarClasspat
   def ivyDeps = Agg(
     ivy"co.fs2::fs2-io:3.12.0",
     ivy"com.disneystreaming.smithy4s::smithy4s-json::${_root_.smithy4s.codegen.BuildInfo.version}",
+    ivy"tech.neander::jsonrpclib-smithy4s::0.0.7+12-53cee0a5-SNAPSHOT",
   )
 
   override def smithy4sIvyDeps = Agg(
