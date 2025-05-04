@@ -5,9 +5,17 @@ import scalalib._
 import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.17.4`
 import _root_.smithy4s.codegen.mill._
 
-object sls extends ScalaModule {
+trait SharedJarClasspath extends ScalaModule {
+
+  override def unmanagedClasspath = T {
+    os.list(os.pwd / "lib").filter(_.ext == "jar").map(PathRef(_))
+  }
+}
+
+object sls extends ScalaModule with SharedJarClasspath {
 
   def scalaVersion = "3.6.4"
+  def moduleDeps   = Seq(bspJsonRpc)
 
   def ivyDeps = Agg(
     ivy"tech.neander::langoustine-app::0.0.21",
@@ -27,17 +35,13 @@ object sls extends ScalaModule {
   }
 }
 
-object demoBspSmithy extends ScalaModule with Smithy4sModule {
+object bspJsonRpc extends ScalaModule with Smithy4sModule with SharedJarClasspath {
 
   def scalaVersion = "3.6.4"
 
   def scalacOptions = Seq(
     "-Wunused:all"
   )
-
-  def unmanagedClasspath = T {
-    os.list(os.pwd / "lib").map(PathRef(_))
-  }
 
   override def smithy4sInputDirs: Sources = T.sources {
     super.smithy4sInputDirs() ++ Seq(
