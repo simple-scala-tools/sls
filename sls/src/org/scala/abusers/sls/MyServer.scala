@@ -16,7 +16,6 @@ import langoustine.lsp.all.*
 import langoustine.lsp.app.*
 
 import scala.concurrent.duration.*
-import java.nio.charset.StandardCharsets
 
 object MyServer extends LangoustineApp.Simple:
 
@@ -124,11 +123,11 @@ def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
 def sendMessage(back: Communicate[IO], msg: String): IO[Unit] =
   back.notification(
     window.showMessage,
-    ShowMessageParams(MessageType.Info, msg)
+    ShowMessageParams(MessageType.Info, msg),
   ) *> logMessage(back, msg)
 
 def logMessage(back: Communicate[IO], message: String): IO[Unit] =
   back.notification(
     window.logMessage,
-    LogMessageParams(MessageType.Info, message)
+    LogMessageParams(MessageType.Info, message),
   )

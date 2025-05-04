@@ -1,11 +1,12 @@
 package org.scala.abusers.sls
 
-import langoustine.lsp.Invocation
 import cats.effect.IO
-import langoustine.lsp.Communicate
-import langoustine.lsp.requests.*
 import cats.MonadThrow
 import jsonrpclib.Monadic
+import langoustine.lsp.requests.*
+import langoustine.lsp.Communicate
+import langoustine.lsp.Invocation
+
 import scala.collection.mutable.ListBuffer
 
 given [F[_]](using MonadThrow[F]): Monadic[F] with
@@ -21,7 +22,7 @@ given [F[_]](using MonadThrow[F]): Monadic[F] with
 end given
 
 case class TestClient(log: weaver.Log[IO]):
-  val communicate = TestCommunicate(log)
+  val communicate                            = TestCommunicate(log)
   def input[A](params: A): Invocation[A, IO] = TestInvocation(params)
 
   private case class TestInvocation[A](params: A) extends Invocation[A, IO]:
