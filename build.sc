@@ -1,5 +1,3 @@
-package build
-
 import mill._
 import scalalib._
 
@@ -16,8 +14,10 @@ object sls extends ScalaModule {
     "-Wunused:all"
   )
 
-  object test extends ScalaTests {
-    def ivyDeps       = Agg(ivy"com.lihaoyi::utest:0.8.5")
-    def testFramework = "utest.runner.Framework"
+  object test extends Tests {
+    def ivyDeps = Agg(
+      ivy"com.disneystreaming::weaver-cats:0.8.4"
+    )
+    def testFramework = "weaver.framework.CatsEffect"
   }
 }
