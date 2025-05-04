@@ -7,7 +7,7 @@ import _root_.smithy4s.codegen.mill._
 
 object sls extends ScalaModule {
 
-  def scalaVersion = "3.6.4"
+  def scalaVersion = "3.7.0-RC4"
   def moduleDeps   = Seq(bspJsonRpc)
   def mainClass    = Some("org.scala.abusers.sls.MyServer")
 
