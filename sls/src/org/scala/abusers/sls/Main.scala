@@ -15,6 +15,7 @@ import langoustine.lsp.app.*
 
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import cats.effect.std.Random
 
 object MyServer extends LangoustineApp.Simple:
 
@@ -59,8 +60,8 @@ object MyServer extends LangoustineApp.Simple:
       }
 
   private def connectWithBloop(back: Communicate[IO]): IO[BloopConnection] =
-    val temp       = os.temp.dir(prefix = "sls")
-    val socketFile = temp / s"bloop-${UUID.randomUUID()}.socket"
+    val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
+    val socketFile = temp / s"bloop.socket"
     (for
       bspSocketProc <- ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
         .spawn[IO]
