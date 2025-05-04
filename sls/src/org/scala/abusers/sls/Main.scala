@@ -14,8 +14,6 @@ import langoustine.lsp.all.*
 import langoustine.lsp.app.*
 
 import java.nio.charset.StandardCharsets
-import java.util.UUID
-import cats.effect.std.Random
 
 object MyServer extends LangoustineApp.Simple:
 
