@@ -9,9 +9,10 @@ object sls extends ScalaModule {
 
   def scalaVersion = "3.6.4"
   def moduleDeps   = Seq(bspJsonRpc)
+  def mainClass    = Some("org.scala.abusers.sls.MyServer")
 
   def ivyDeps = Agg(
-    ivy"tech.neander::langoustine-app::0.0.21",
+    ivy"tech.neander::langoustine-app::0.0.22",
     ivy"com.lihaoyi::os-lib:0.11.4",
     ivy"co.fs2::fs2-io:3.12.0",
   )
@@ -43,9 +44,9 @@ object bspJsonRpc extends ScalaModule with Smithy4sModule {
   }
 
   def ivyDeps = Agg(
-    ivy"co.fs2::fs2-io:3.12.0",
+    ivy"co.fs2::fs2-io:3.13.0-M2",
     ivy"com.disneystreaming.smithy4s::smithy4s-json::${_root_.smithy4s.codegen.BuildInfo.version}",
-    ivy"tech.neander::jsonrpclib-smithy4s::0.0.7+12-53cee0a5-SNAPSHOT",
+    ivy"tech.neander::jsonrpclib-smithy4s::0.0.7+13-b18708ff-SNAPSHOT",
   )
 
   override def smithy4sIvyDeps = Agg(

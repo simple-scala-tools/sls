@@ -1,14 +1,27 @@
 package examples.smithy.server
 
 import cats.effect.*
+import cats.effect.std.Console
+import cats.effect.Concurrent
 import cats.syntax.all.*
+import com.comcast.ip4s.*
 import fs2.io.*
+import fs2.io.net.Datagram
+import fs2.io.net.Network
+import fs2.io.net.Socket
+import fs2.io.net.SocketGroup
+import fs2.io.net.SocketOption
+import fs2.text
+import fs2.Stream
 import jsonrpclib.fs2.*
 import jsonrpclib.smithy4sinterop.ClientStub
 import jsonrpclib.smithy4sinterop.ServerEndpoints
 import jsonrpclib.CallId
 import jsonrpclib.Endpoint
 import test.* // smithy4s-generated package
+
+def client(path: String) =
+  val socket = Network[IO].connect(UnixSocketAddress(path))
 
 object ServerMain extends IOApp.Simple:
 

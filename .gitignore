@@ -12,3 +12,6 @@ out
 
 .DS_STORE
 langoustine-tracer
+
+.idea
+.vscode
