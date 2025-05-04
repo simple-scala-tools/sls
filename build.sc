@@ -1,7 +1,6 @@
 import mill._
-import scalalib._
-
 import mill.define.Sources
+import scalalib._
 
 import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.17.4`
 import _root_.smithy4s.codegen.mill._
@@ -49,5 +48,9 @@ object demoBspSmithy extends ScalaModule with Smithy4sModule {
   def ivyDeps = Agg(
     ivy"co.fs2::fs2-io:3.12.0",
     ivy"com.disneystreaming.smithy4s::smithy4s-json::${_root_.smithy4s.codegen.BuildInfo.version}",
+  )
+
+  override def smithy4sIvyDeps = Agg(
+    ivy"com.disneystreaming.alloy:alloy-core:0.2.2"
   )
 }
