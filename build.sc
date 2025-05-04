@@ -7,14 +7,14 @@ import _root_.smithy4s.codegen.mill._
 
 object sls extends ScalaModule {
 
-  def scalaVersion = "3.6.4"
+  def scalaVersion = "3.7.0-RC4"
   def moduleDeps   = Seq(bspJsonRpc)
   def mainClass    = Some("org.scala.abusers.sls.MyServer")
 
   def ivyDeps = Agg(
     ivy"tech.neander::langoustine-app::0.0.22",
     ivy"com.lihaoyi::os-lib:0.11.4",
-    ivy"co.fs2::fs2-io:3.12.0",
+    ivy"co.fs2::fs2-io:3.12.0"
   )
 
   def scalacOptions = Seq(

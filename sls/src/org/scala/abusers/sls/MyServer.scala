@@ -16,6 +16,7 @@ import langoustine.lsp.all.*
 import langoustine.lsp.app.*
 
 import scala.concurrent.duration.*
+import java.nio.charset.StandardCharsets
 
 object MyServer extends LangoustineApp.Simple:
 
@@ -32,45 +33,47 @@ object MyServer extends LangoustineApp.Simple:
           .getAndUpdate(_.copy(bloopConn = None))
           .map(_.release)
       )
-      .use(myLSP.andThen(IO(_)))
+      .use(myLSP(using _))
       .guaranteeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
-  private def myLSP(stateRef: Ref[IO, State]): LSPBuilder[IO] =
-    LSPBuilder
+  private def myLSP(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
+
+    for textDocumentSync <- DocumentSyncManager.create
+    yield LSPBuilder
       .create[IO]
-      .handleRequest(initialize) { in =>
-        val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
-        val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
-        (for
-          _         <- sendMessage(in.toClient, "ready to initialise!")
-          _         <- importMillBsp(rootPath, in.toClient)
-          bloopConn <- connectWithBloop(in.toClient)
-          _         <- logMeesage(in.toClient, "Connection with bloop estabilished")
-          response <- bloopConn.client.buildInitialize(
-            displayName = "dupa",
-            version = "0.0.0",
-            bspVersion = "2.1.0",
-            rootUri = bsp.URI("file:///home/kghost/workspace/sst/playground"),
-            capabilities = BuildClientCapabilities(languageIds = List(LanguageId("scala"))),
-          )
-          _ <- logMeesage(in.toClient, s"Response from bsp: $response")
-          _ <- bloopConn.client.onBuildInitialized()
-          _ <- stateRef.update(_.withBloopConnection(bloopConn))
-        yield InitializeResult(
-          capabilities = ServerCapabilities(textDocumentSync = Opt(TextDocumentSyncKind.Full)),
-          serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
-        )).guaranteeCase(s => logMeesage(in.toClient, s"closing initalize with $s"))
-      }
-      .handleNotification(textDocument.didOpen) { in =>
-        val documentUri = in.params.textDocument.uri.value
-        stateRef
-          .updateAndGet(state => state.copy(files = state.files + documentUri))
-          .map(_.files.size)
-          .flatMap { count =>
-            sendMessage(in.toClient, s"In total, $count files registered!")
-          }
-          .guaranteeCase(s => logMeesage(in.toClient, s"closing notify with $s"))
-      }
+      .handleRequest(initialize)(handleInitialize)
+      .handleNotification(textDocument.didOpen)(textDocumentSync.didOpen)
+      .handleNotification(textDocument.didClose)(textDocumentSync.didClose)
+      .handleNotification(textDocument.didChange)(textDocumentSync.didChange)
+      .handleNotification(textDocument.didSave)(textDocumentSync.didSave)
+
+  private def handleInitialize(in: Invocation[InitializeParams, IO])(using stateRef: Ref[IO, State]) =
+    val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
+    val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
+    (for
+      _         <- sendMessage(in.toClient, "ready to initialise!")
+      _         <- importMillBsp(rootPath, in.toClient)
+      bloopConn <- connectWithBloop(in.toClient)
+      _         <- logMessage(in.toClient, "Connection with bloop estabilished")
+      response <- bloopConn.client.buildInitialize(
+        displayName = "dupa",
+        version = "0.0.0",
+        bspVersion = "2.1.0",
+        rootUri = bsp.URI("file:///home/kghost/workspace/sst/playground"),
+        capabilities = BuildClientCapabilities(languageIds = List(LanguageId("scala"))),
+      )
+      _ <- logMessage(in.toClient, s"Response from bsp: $response")
+      _ <- bloopConn.client.onBuildInitialized()
+      _ <- stateRef.update(_.withBloopConnection(bloopConn))
+    yield InitializeResult(
+      capabilities = serverCapabilities,
+      serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
+    )).guaranteeCase(s => logMessage(in.toClient, s"closing initalize with $s"))
+
+  private def serverCapabilities: ServerCapabilities =
+    ServerCapabilities(
+      textDocumentSync = Opt(TextDocumentSyncKind.Incremental)
+    )
 
   private def connectWithBloop(back: Communicate[IO]): IO[BloopConnection] =
     val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
@@ -82,7 +85,7 @@ object MyServer extends LangoustineApp.Simple:
           .merge(bspSocketProc.stderr)
           .through(text.utf8.decode)
           .through(text.lines)
-          .evalMap(s => logMeesage(back, s"[bloop] $s"))
+          .evalMap(s => logMessage(back, s"[bloop] $s"))
           .onFinalizeCase(c => sendMessage(back, s"Bloop process terminated $c"))
           .compile
           .drain
@@ -92,9 +95,9 @@ object MyServer extends LangoustineApp.Simple:
 
     (for
       socketPath <- bspProcess
-      _          <- Resource.eval(IO.sleep(1.seconds) *> logMeesage(back, s"Looking for socket at $socketPath"))
+      _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
       channel    <- FS2Channel.resource[IO]()
-      client     <- makeBspClient(socketPath.toString, channel, msg => logMeesage(back, msg))
+      client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, msg))
     yield client).allocated
       .map { case (client, cancel) => BloopConnection(client, cancel) }
 
@@ -113,7 +116,7 @@ def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
         .through(text.lines)
 
       allOutput
-        .evalMap(s => logMeesage(back, s))
+        .evalMap(s => logMessage(back, s))
         .compile
         .drain
     }
@@ -121,11 +124,11 @@ def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
 def sendMessage(back: Communicate[IO], msg: String): IO[Unit] =
   back.notification(
     window.showMessage,
-    ShowMessageParams(MessageType.Info, msg),
-  ) *> logMeesage(back, msg)
+    ShowMessageParams(MessageType.Info, msg)
+  ) *> logMessage(back, msg)
 
-def logMeesage(back: Communicate[IO], message: String): IO[Unit] =
+def logMessage(back: Communicate[IO], message: String): IO[Unit] =
   back.notification(
     window.logMessage,
-    LogMessageParams(MessageType.Info, message),
+    LogMessageParams(MessageType.Info, message)
   )
