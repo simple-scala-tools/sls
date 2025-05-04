@@ -1,5 +1,7 @@
 ## Tracer command
 
+![logo](./logo.png)
+
 You should have langoustine-tracer launcher in server root.
 
 ```bash
