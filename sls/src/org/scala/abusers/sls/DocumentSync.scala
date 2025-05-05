@@ -67,7 +67,7 @@ case class DocumentState(content: Ref[IO, String]):
   def getContent: IO[String] = content.get
 
 object DocumentSyncManager:
-  def create: IO[DocumentSyncManager] =
+  def instance: IO[DocumentSyncManager] =
     Ref.of[IO, Map[URI, DocumentState]](Map.empty).map(DocumentSyncManager(_))
 
 class DocumentSyncManager(val documents: Ref[IO, Map[URI, DocumentState]]):

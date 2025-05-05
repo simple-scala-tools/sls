@@ -16,8 +16,9 @@ import langoustine.lsp.all.*
 import langoustine.lsp.app.*
 
 import scala.concurrent.duration.*
+import org.scala.abusers.pc.BlockingServiceLoader
 
-object MyServer extends LangoustineApp.Simple:
+object SimpleScalaServer extends LangoustineApp.Simple:
 
   private case class State(files: Set[String], bloopConn: Option[BloopConnection]):
     def release: IO[Unit]                          = OptionT.fromOption[IO](bloopConn).semiflatTap(_.cancel).value.void
@@ -37,14 +38,28 @@ object MyServer extends LangoustineApp.Simple:
 
   private def myLSP(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
 
-    for textDocumentSync <- DocumentSyncManager.create
+    for
+      textDocumentSync <- DocumentSyncManager.instance
+      serviceLoader <- BlockingServiceLoader.instance
     yield LSPBuilder
       .create[IO]
       .handleRequest(initialize)(handleInitialize)
       .handleNotification(textDocument.didOpen)(textDocumentSync.didOpen)
       .handleNotification(textDocument.didClose)(textDocumentSync.didClose)
       .handleNotification(textDocument.didChange)(textDocumentSync.didChange)
-      .handleNotification(textDocument.didSave)(textDocumentSync.didSave)
+      .handleNotification(textDocument.didSave): in =>
+        for
+          _ <- textDocumentSync.didSave(in)
+          state <- stateRef.get
+          bloop = state.bloopConn.get.client
+          targets <- bloop.workspaceBuildTargets()
+          targets0 = targets.targets.map(_.id)
+          // ourTarget <- targets.targets.find(in.params.textDocument.uri)
+          result <- bloop.buildTargetCompile(targets0)
+          _ <- logMessage(in.toClient, s"${result}")
+          generatedByMetals <- logMessage(in.toClient, s"Build targets: ${targets}")
+        yield generatedByMetals
+
 
   private def handleInitialize(in: Invocation[InitializeParams, IO])(using stateRef: Ref[IO, State]) =
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
@@ -54,11 +69,11 @@ object MyServer extends LangoustineApp.Simple:
       _         <- importMillBsp(rootPath, in.toClient)
       bloopConn <- connectWithBloop(in.toClient)
       _         <- logMessage(in.toClient, "Connection with bloop estabilished")
-      response <- bloopConn.client.buildInitialize(
-        displayName = "dupa",
+      response  <- bloopConn.client.buildInitialize(
+        displayName = "bloop",
         version = "0.0.0",
         bspVersion = "2.1.0",
-        rootUri = bsp.URI("file:///home/kghost/workspace/sst/playground"),
+        rootUri = bsp.URI(rootUri.value),
         capabilities = BuildClientCapabilities(languageIds = List(LanguageId("scala"))),
       )
       _ <- logMessage(in.toClient, s"Response from bsp: $response")
