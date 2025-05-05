@@ -1,3 +1,5 @@
+import coursier.core.Repository
+import coursier.maven.MavenRepository
 import mill._
 import mill.define.Sources
 import scalalib._
@@ -5,19 +7,27 @@ import scalalib._
 import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.18.34`
 import _root_.smithy4s.codegen.mill._
 
-val globalScalaVersion = "3.7.0"
+trait CommonScalaModule extends ScalaModule {
+  override def repositoriesTask: Task[Seq[Repository]] = T.task {
+    Seq(
+      MavenRepository(
+        "https://s01.oss.sonatype.org/content/repositories/snapshots"
+      )
+    ) ++ super.repositoriesTask()
+  }
 
-object sls extends ScalaModule {
+  def scalaVersion = "3.7.0"
+}
 
-  def scalaVersion = globalScalaVersion
-  def moduleDeps   = Seq(bspJsonRpc)
-  def mainClass    = Some("org.scala.abusers.sls.SimpleScalaServer")
+object sls extends CommonScalaModule {
+
+  def moduleDeps = Seq(bspJsonRpc)
+  def mainClass  = Some("org.scala.abusers.sls.SimpleScalaServer")
 
   def ivyDeps = Agg(
+    ivy"tech.neander::jsonrpclib-fs2::0.0.7+20-ba98e073-SNAPSHOT".forceVersion(),
     ivy"tech.neander::langoustine-app::0.0.22",
     ivy"com.lihaoyi::os-lib:0.11.4",
-    ivy"co.fs2::fs2-io:3.12.0",
-    ivy"io.get-coursier::coursier:2.1.24"
   )
 
   def scalacOptions = Seq(
@@ -32,27 +42,19 @@ object sls extends ScalaModule {
   }
 }
 
-object bspJsonRpc extends ScalaModule with Smithy4sModule {
-
-  def scalaVersion = globalScalaVersion
+object bspJsonRpc extends CommonScalaModule with Smithy4sModule {
 
   def scalacOptions = Seq(
     "-Wunused:all"
   )
 
-  override def smithy4sInputDirs: Sources = T.sources {
-    super.smithy4sInputDirs() ++ Seq(
-      PathRef(os.pwd / "lib" / "smithy.jar")
-    )
-  }
-
   def ivyDeps = Agg(
     ivy"co.fs2::fs2-io:3.13.0-M2",
     ivy"com.disneystreaming.smithy4s::smithy4s-json::${_root_.smithy4s.codegen.BuildInfo.version}",
-    ivy"tech.neander::jsonrpclib-smithy4s::0.0.7+13-b18708ff-SNAPSHOT",
+    ivy"tech.neander::jsonrpclib-smithy4s::0.0.7+20-ba98e073-SNAPSHOT",
   )
 
   override def smithy4sIvyDeps = Agg(
-    ivy"com.disneystreaming.alloy:alloy-core:0.2.2"
+    ivy"com.disneystreaming.alloy:alloy-core:0.3.19"
   )
 }

@@ -14,9 +14,9 @@ import jsonrpclib.fs2.FS2Channel
 import langoustine.lsp.*
 import langoustine.lsp.all.*
 import langoustine.lsp.app.*
+import org.scala.abusers.pc.BlockingServiceLoader
 
 import scala.concurrent.duration.*
-import org.scala.abusers.pc.BlockingServiceLoader
 
 object SimpleScalaServer extends LangoustineApp.Simple:
 
@@ -40,7 +40,7 @@ object SimpleScalaServer extends LangoustineApp.Simple:
 
     for
       textDocumentSync <- DocumentSyncManager.instance
-      serviceLoader <- BlockingServiceLoader.instance
+      serviceLoader    <- BlockingServiceLoader.instance
     yield LSPBuilder
       .create[IO]
       .handleRequest(initialize)(handleInitialize)
@@ -49,17 +49,16 @@ object SimpleScalaServer extends LangoustineApp.Simple:
       .handleNotification(textDocument.didChange)(textDocumentSync.didChange)
       .handleNotification(textDocument.didSave): in =>
         for
-          _ <- textDocumentSync.didSave(in)
+          _     <- textDocumentSync.didSave(in)
           state <- stateRef.get
           bloop = state.bloopConn.get.client
           targets <- bloop.workspaceBuildTargets()
           targets0 = targets.targets.map(_.id)
           // ourTarget <- targets.targets.find(in.params.textDocument.uri)
-          result <- bloop.buildTargetCompile(targets0)
-          _ <- logMessage(in.toClient, s"${result}")
+          result            <- bloop.buildTargetCompile(targets0)
+          _                 <- logMessage(in.toClient, s"${result}")
           generatedByMetals <- logMessage(in.toClient, s"Build targets: ${targets}")
         yield generatedByMetals
-
 
   private def handleInitialize(in: Invocation[InitializeParams, IO])(using stateRef: Ref[IO, State]) =
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
@@ -69,7 +68,7 @@ object SimpleScalaServer extends LangoustineApp.Simple:
       _         <- importMillBsp(rootPath, in.toClient)
       bloopConn <- connectWithBloop(in.toClient)
       _         <- logMessage(in.toClient, "Connection with bloop estabilished")
-      response  <- bloopConn.client.buildInitialize(
+      response <- bloopConn.client.buildInitialize(
         displayName = "bloop",
         version = "0.0.0",
         bspVersion = "2.1.0",
