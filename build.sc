@@ -5,9 +5,11 @@ import scalalib._
 import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.18.34`
 import _root_.smithy4s.codegen.mill._
 
+val globalScalaVersion = "3.7.0"
+
 object sls extends ScalaModule {
 
-  def scalaVersion = "3.7.0-RC4"
+  def scalaVersion = globalScalaVersion
   def moduleDeps   = Seq(bspJsonRpc)
   def mainClass    = Some("org.scala.abusers.sls.MyServer")
 
@@ -31,7 +33,7 @@ object sls extends ScalaModule {
 
 object bspJsonRpc extends ScalaModule with Smithy4sModule {
 
-  def scalaVersion = "3.6.4"
+  def scalaVersion = globalScalaVersion
 
   def scalacOptions = Seq(
     "-Wunused:all"
