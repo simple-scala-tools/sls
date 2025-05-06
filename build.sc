@@ -26,10 +26,10 @@ object sls extends CommonScalaModule {
 
   def ivyDeps = Agg(
     ivy"co.fs2::fs2-io:3.13.0-M2",
-    ivy"tech.neander::jsonrpclib-fs2::0.0.7+18-0e7dd223-SNAPSHOT".forceVersion(),
+    ivy"tech.neander::jsonrpclib-fs2::0.0.7+19-7d1323ce-SNAPSHOT".forceVersion(),
     ivy"tech.neander::langoustine-app::0.0.22",
     ivy"com.lihaoyi::os-lib:0.11.4",
-    ivy"org.polyvariant.smithy4s-bsp::bsp4s:0.1-d25359c-20250506T013346Z-SNAPSHOT",
+    ivy"org.polyvariant.smithy4s-bsp::bsp4s:0.1-6afb558-SNAPSHOT",
   )
 
   def scalacOptions = Seq(
@@ -55,6 +55,6 @@ object bspJsonRpc extends CommonScalaModule with Smithy4sModule {
   )
 
   override def smithy4sIvyDeps = Agg(
-    ivy"tech.neander:jsonrpclib-smithy:0.0.7+18-0e7dd223+20250506-0324-SNAPSHOT"
+    ivy"tech.neander:jsonrpclib-smithy:0.0.7+19-7d1323ce-SNAPSHOT"
   )
 }
