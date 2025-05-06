@@ -34,7 +34,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
     for
-      mgr <- DocumentSyncManager.create
+      mgr <- DocumentSyncManager.instance
       _   <- mgr.didOpen(client.input(open(uri, "Hello!")))
 
       _ <- mgr.didChange(
@@ -62,7 +62,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
     for
-      mgr <- DocumentSyncManager.create
+      mgr <- DocumentSyncManager.instance
       _   <- mgr.didOpen(client.input(open(uri, "val z = 3")))
 
       _ <- mgr.didChange(
@@ -86,7 +86,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
     for
-      mgr <- DocumentSyncManager.create
+      mgr <- DocumentSyncManager.instance
       _   <- mgr.didOpen(client.input(open(uri, "val x = 1\nval y = 2")))
 
       // full document replacement
@@ -109,7 +109,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
     for
-      mgr <- DocumentSyncManager.create
+      mgr <- DocumentSyncManager.instance
       _   <- mgr.didOpen(client.input(open(uri, "val x = 1\nval y = 2\nval z = 3")))
 
       // full document replacement

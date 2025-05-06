@@ -4,7 +4,7 @@ import mill._
 import mill.define.Sources
 import scalalib._
 
-import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.18.34`
+import $ivy.`com.disneystreaming.smithy4s::smithy4s-mill-codegen-plugin::0.18.35`
 import _root_.smithy4s.codegen.mill._
 
 trait CommonScalaModule extends ScalaModule {
@@ -25,9 +25,11 @@ object sls extends CommonScalaModule {
   def mainClass  = Some("org.scala.abusers.sls.SimpleScalaServer")
 
   def ivyDeps = Agg(
-    ivy"tech.neander::jsonrpclib-fs2::0.0.7+20-ba98e073-SNAPSHOT".forceVersion(),
+    ivy"co.fs2::fs2-io:3.13.0-M2",
+    ivy"tech.neander::jsonrpclib-fs2::0.0.7+18-0e7dd223-SNAPSHOT".forceVersion(),
     ivy"tech.neander::langoustine-app::0.0.22",
     ivy"com.lihaoyi::os-lib:0.11.4",
+    ivy"org.polyvariant.smithy4s-bsp::bsp4s:0.1-d25359c-20250506T013346Z-SNAPSHOT",
   )
 
   def scalacOptions = Seq(
@@ -49,12 +51,10 @@ object bspJsonRpc extends CommonScalaModule with Smithy4sModule {
   )
 
   def ivyDeps = Agg(
-    ivy"co.fs2::fs2-io:3.13.0-M2",
-    ivy"com.disneystreaming.smithy4s::smithy4s-json::${_root_.smithy4s.codegen.BuildInfo.version}",
-    ivy"tech.neander::jsonrpclib-smithy4s::0.0.7+20-ba98e073-SNAPSHOT",
+    ivy"com.disneystreaming.smithy4s::smithy4s-core::${_root_.smithy4s.codegen.BuildInfo.version}"
   )
 
   override def smithy4sIvyDeps = Agg(
-    ivy"com.disneystreaming.alloy:alloy-core:0.3.19"
+    ivy"tech.neander:jsonrpclib-smithy:0.0.7+18-0e7dd223+20250506-0324-SNAPSHOT"
   )
 }

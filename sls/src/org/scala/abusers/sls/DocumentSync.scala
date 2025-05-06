@@ -1,11 +1,9 @@
 package org.scala.abusers.sls // TODO package completions are still here when they should not, also we should get whole package completion out of the box
 
 import cats.effect.*
-import cats.effect.std.Queue
 import cats.syntax.all.*
 import langoustine.lsp.aliases.TextDocumentContentChangeEvent
 import langoustine.lsp.structures.*
-import langoustine.lsp.Communicate
 import langoustine.lsp.Invocation
 
 import java.net.URI
