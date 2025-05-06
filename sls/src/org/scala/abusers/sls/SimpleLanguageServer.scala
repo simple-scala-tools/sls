@@ -53,10 +53,7 @@ object SimpleScalaServer extends LangoustineApp.Simple:
           state <- stateRef.get
           bloop = state.bloopConn.get.client
           targets <- bloop.workspaceBuildTargets()
-          targets0 = targets.targets
-            // todo: dispatch to all the targets or wait for smithy4s to add mixins even without @adt
-            .map(t => t.project.scala.getOrElse(sys.error(s"not a scala target: $t")))
-            .map(_.id)
+          targets0 = targets.targets.map(_.id)
           // ourTarget <- targets.targets.find(in.params.textDocument.uri)
           result            <- bloop.buildTargetCompile(targets0)
           _                 <- logMessage(in.toClient, s"${result}")

@@ -7,9 +7,8 @@ import scalalib._
 trait CommonScalaModule extends ScalaModule {
   override def repositoriesTask: Task[Seq[Repository]] = T.task {
     Seq(
-      MavenRepository(
-        "https://s01.oss.sonatype.org/content/repositories/snapshots"
-      )
+      MavenRepository("https://s01.oss.sonatype.org/content/repositories/snapshots"),
+      MavenRepository("https://s01.oss.sonatype.org/content/repositories/releases"),
     ) ++ super.repositoriesTask()
   }
 
@@ -25,7 +24,7 @@ object sls extends CommonScalaModule {
     ivy"tech.neander::jsonrpclib-fs2::0.0.8+20-8d37b4ca-SNAPSHOT".forceVersion(),
     ivy"tech.neander::langoustine-app::0.0.22",
     ivy"com.lihaoyi::os-lib:0.11.4",
-    ivy"org.polyvariant.smithy4s-bsp::bsp4s:0.1-8c8935f-SNAPSHOT",
+    ivy"org.polyvariant.smithy4s-bsp::bsp4s:0.1.0",
   )
 
   def scalacOptions = Seq(
