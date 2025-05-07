@@ -1,27 +1,27 @@
 package org.scala.abusers.sls
 
-import langoustine.lsp.structures.*
-import langoustine.lsp.*
-import langoustine.lsp.runtime.*
-import cats.effect.IO
 import cats.effect.kernel.Ref
-import org.scala.abusers.pc.PresentationCompilerProvider
-
+import cats.effect.kernel.Resource
+import cats.effect.IO
 import cats.syntax.all.*
 import fs2.io.process.ProcessBuilder
 import fs2.text
-import cats.effect.kernel.Resource
-import scala.concurrent.duration.*
 import jsonrpclib.fs2.FS2Channel
-import org.scala.abusers.sls.LspNioConverter.asNio
-import org.scala.abusers.pc.ScalaVersion
+import langoustine.lsp.*
+import langoustine.lsp.runtime.*
+import langoustine.lsp.structures.*
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
+import org.scala.abusers.pc.PresentationCompilerProvider
+import org.scala.abusers.pc.ScalaVersion
+import org.scala.abusers.sls.LspNioConverter.asNio
+
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 class ServerImpl(
-  textDocumentSync: DocumentSyncManager,
-  pcProvider: PresentationCompilerProvider,
-  inverseSource: InverseSourcesToTarget,
+    textDocumentSync: DocumentSyncManager,
+    pcProvider: PresentationCompilerProvider,
+    inverseSource: InverseSourcesToTarget,
 ):
 
   def handleCompletion(in: Invocation[CompletionParams, IO])(using stateRef: Ref[IO, State]) =
@@ -29,30 +29,35 @@ class ServerImpl(
     for
       state <- stateRef.get
       bloop = state.bloopConn.get.client
-      buildTarget <- inverseSource.get(uri) // file may be owned by multiple targets eg. with crossbuild double check this
+      buildTarget <- inverseSource.get(
+        uri
+      ) // file may be owned by multiple targets eg. with crossbuild double check this
       allTargets <- bloop.workspaceBuildTargets()
-      ourTarget = allTargets.targets.find(_.project.scala.get.id == buildTarget)
+      ourTarget = allTargets.targets.find(_.id == buildTarget)
       _ <- logMessage(in.toClient, ourTarget.toString)
-      scalaBuildTarget = ourTarget.get.project.scala.get
-      _ <- logMessage(in.toClient, scalaBuildTarget.toString)
-      _ <- logMessage(in.toClient, "completion start")
-      pc <- pcProvider.get(ScalaVersion("3.7.0"))
+      scalaBuildTarget = ourTarget.get
+      _     <- logMessage(in.toClient, scalaBuildTarget.toString)
+      _     <- logMessage(in.toClient, "completion start")
+      pc    <- pcProvider.get(ScalaVersion("3.7.0"))
       state <- textDocumentSync.get(uri)
-      cs <- state.getContent
+      cs    <- state.getContent
       params = in.params.toOffsetParams(cs)
-      _ <- logMessage(in.toClient, params.toString)
+      _      <- logMessage(in.toClient, params.toString)
       result <- IO.fromCompletableFuture(IO(pc.complete(params)))
-      _ <- logMessage(in.toClient, result.toString)
-    yield
-      Opt(
-        structures.CompletionList(
-          result.isIncomplete(),
-          items = result.getItems().asScala.toVector.map: i =>
+      _      <- logMessage(in.toClient, result.toString)
+    yield Opt(
+      structures.CompletionList(
+        result.isIncomplete(),
+        items = result
+          .getItems()
+          .asScala
+          .toVector
+          .map: i =>
             structures.CompletionItem(
               label = i.getLabel()
-            )
-        )
+            ),
       )
+    )
 
   def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
     // for
@@ -73,9 +78,9 @@ class ServerImpl(
     for
       state <- stateRef.get
       bloop = state.bloopConn.get.client
-      _ <- textDocumentSync.didSave(in)
+      _           <- textDocumentSync.didSave(in)
       buildTarget <- inverseSource.get(in.params.textDocument.uri.asNio)
-      result <- bloop.buildTargetCompile(buildTarget) // straight to jar here ?? TODO add ID
+      result      <- bloop.buildTargetCompile(buildTarget) // straight to jar here ?? TODO add ID
     yield ()
 
   def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
@@ -118,7 +123,7 @@ class ServerImpl(
   private def serverCapabilities: ServerCapabilities =
     ServerCapabilities(
       textDocumentSync = Opt(enumerations.TextDocumentSyncKind.Incremental),
-      completionProvider = Opt(CompletionOptions(triggerCharacters = Opt(Vector("."))))
+      completionProvider = Opt(CompletionOptions(triggerCharacters = Opt(Vector(".")))),
     )
 
   private def connectWithBloop(back: Communicate[IO]): IO[BloopConnection] =
@@ -178,4 +183,3 @@ class ServerImpl(
       requests.window.logMessage,
       LogMessageParams(enumerations.MessageType.Info, message),
     )
-

@@ -1,19 +1,22 @@
 package org.scala.abusers.pc
 
-import scala.collection.mutable.ArrayBuffer
-import org.scala.abusers.sls.Chars
 import langoustine.lsp.structures.CompletionParams
-import scala.meta.pc.OffsetParams
-import scala.meta.pc.CancelToken
-import java.util.concurrent.CompletionStage
+import org.scala.abusers.sls.Chars
+
 import java.net.URI
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
+import scala.collection.mutable.ArrayBuffer
+import scala.meta.pc.CancelToken
+import scala.meta.pc.OffsetParams
 
 object PresentationCompilerDTOInterop:
 
   // We need to translate lsp4j / scalameta into langoustine and vice versa. It may be good idea to use chimney here
 
-  private def calculateLineIndicesFromContents(cs: String) = // TODO temp solution just to make completions work, to be refactored into DocumentSync
+  private def calculateLineIndicesFromContents(
+      cs: String
+  ) = // TODO temp solution just to make completions work, to be refactored into DocumentSync
     val buf = new ArrayBuffer[Int]
     buf += 0
     var i = 0
@@ -28,16 +31,15 @@ object PresentationCompilerDTOInterop:
     buf += cs.length // sentinel, so that findLine below works smoother
     buf.toArray
 
-
   extension (x: CompletionParams)
     def toOffsetParams(cs: String): OffsetParams = new OffsetParams:
       override def toString(): String =
         s"""offset: $offset
            |$uri
            |$text""".stripMargin
-      def offset(): Int = calculateLineIndicesFromContents(cs)(x.position.line.value) + x.position.character.value
+      def offset(): Int  = calculateLineIndicesFromContents(cs)(x.position.line.value) + x.position.character.value
       def text(): String = cs
       def token(): CancelToken = new CancelToken: // FIXME very bad
-        def checkCanceled(): Unit = ()
+        def checkCanceled(): Unit                          = ()
         def onCancel(): CompletionStage[java.lang.Boolean] = CompletableFuture.completedFuture(java.lang.Boolean.FALSE)
       def uri(): URI = URI.create(x.textDocument.uri.value)
