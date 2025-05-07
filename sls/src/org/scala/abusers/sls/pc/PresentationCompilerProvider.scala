@@ -12,6 +12,7 @@ import com.evolution.scache.Cache as SCache
 import bsp.BuildTargetIdentifier
 import com.evolution.scache.ExpiringCache
 import scala.concurrent.duration.*
+import java.nio.file.Path
 
 class PresentationCompilerProvider(serviceLoader: BlockingServiceLoader, compilers: SCache[IO, ScalaVersion, PresentationCompiler]):
   import CoursiercatsInterop.*
@@ -37,15 +38,15 @@ class PresentationCompilerProvider(serviceLoader: BlockingServiceLoader, compile
         val urlFullClasspath = fullClasspath.map(_.toURL)
         URLClassLoader(urlFullClasspath.toArray)
 
-  private def createPC(scalaVersion: ScalaVersion) =
+  private def createPC(scalaVersion: ScalaVersion, projectClasspath: List[Path]) =
     for
       compilerClasspath <- fetchPresentationCompilerJars(scalaVersion)
       classloader       <- freshPresentationCompilerClassloader(Nil, compilerClasspath)
       pc <- serviceLoader.load(classOf[PresentationCompiler], PresentationCompilerProvider.classname, classloader)
-    yield pc.newInstance("random", compilerClasspath.map(_.toPath).asJava, Nil.asJava)
+    yield pc.newInstance("random", projectClasspath.asJava, Nil.asJava)
 
-  def get(scalaVersion: ScalaVersion): IO[PresentationCompiler] =
-    compilers.getOrUpdate(scalaVersion)(createPC(scalaVersion))
+  def get(scalaVersion: ScalaVersion, projectClasspath: List[Path]): IO[PresentationCompiler] =
+    compilers.getOrUpdate(scalaVersion)(createPC(scalaVersion, projectClasspath))
 
 object PresentationCompilerProvider:
   val classname = "dotty.tools.pc.ScalaPresentationCompiler"

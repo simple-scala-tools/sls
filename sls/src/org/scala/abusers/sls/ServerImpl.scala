@@ -36,12 +36,14 @@ class ServerImpl(
         bloop = state.bspClient.get
         buildTarget <- inverseSource.get(uri) // file may be owned by multiple targets eg. with crossbuild double check this
         allTargets <- bloop.workspaceBuildTargets()
-        // ourTarget = allTargets.targets.find(_.id == buildTarget)
+        ourTarget = allTargets.targets.find(_.id == buildTarget)
         // _ <- logMessage(in.toClient, ourTarget.toString)
-        // scalaBuildTarget = ourTarget.get
+        scalaBuildTarget = ourTarget.get
         // _     <- logMessage(in.toClient, scalaBuildTarget.toString)
         _     <- logMessage(in.toClient, "completion start")
-        pc    <- pcProvider.get(ScalaVersion("3.6.4-RC1-bin-SNAPSHOT"))
+        scalaVersion = scalaBuildTarget.project.scala.get.data.get.scalaVersion
+        classpath = bloop.buildInitialize
+        pc    <- pcProvider.get(ScalaVersion(scalaVersion), Nil)
         state <- textDocumentSync.get(uri)
         cs    <- state.getContent
 
