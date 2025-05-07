@@ -4,8 +4,6 @@ import langoustine.lsp.structures.CompletionParams
 import org.scala.abusers.sls.Chars
 
 import java.net.URI
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionStage
 import scala.collection.mutable.ArrayBuffer
 import scala.meta.pc.CancelToken
 import scala.meta.pc.OffsetParams
@@ -32,14 +30,18 @@ object PresentationCompilerDTOInterop:
     buf.toArray
 
   extension (x: CompletionParams)
-    def toOffsetParams(cs: String): OffsetParams = new OffsetParams:
-      override def toString(): String =
-        s"""offset: $offset
-           |$uri
-           |$text""".stripMargin
-      def offset(): Int  = calculateLineIndicesFromContents(cs)(x.position.line.value) + x.position.character.value
-      def text(): String = cs
-      def token(): CancelToken = new CancelToken: // FIXME very bad
-        def checkCanceled(): Unit                          = ()
-        def onCancel(): CompletionStage[java.lang.Boolean] = CompletableFuture.completedFuture(java.lang.Boolean.FALSE)
-      def uri(): URI = URI.create(x.textDocument.uri.value)
+    def toOffsetParams(
+        cs: String,
+        cancelToken: CancelToken,
+    ): OffsetParams =
+      new OffsetParams:
+        override def toString(): String =
+          s"""offset: $offset
+             |$uri
+             |$text""".stripMargin
+        def offset(): Int  = calculateLineIndicesFromContents(cs)(x.position.line.value) + x.position.character.value
+        def text(): String = cs
+
+        def token(): CancelToken = cancelToken
+
+        def uri(): URI = URI.create(x.textDocument.uri.value)

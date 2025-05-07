@@ -2,6 +2,7 @@ package org.scala.abusers.sls
 
 import cats.effect.kernel.Ref
 import cats.effect.kernel.Resource
+import cats.effect.std.Dispatcher
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.io.process.ProcessBuilder
@@ -10,6 +11,7 @@ import jsonrpclib.fs2.FS2Channel
 import langoustine.lsp.*
 import langoustine.lsp.runtime.*
 import langoustine.lsp.structures.*
+import org.scala.abusers.pc.IOCancelTokens
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.pc.ScalaVersion
@@ -22,42 +24,47 @@ class ServerImpl(
     textDocumentSync: DocumentSyncManager,
     pcProvider: PresentationCompilerProvider,
     inverseSource: InverseSourcesToTarget,
+    cancelTokens: IOCancelTokens,
 ):
 
   def handleCompletion(in: Invocation[CompletionParams, IO])(using stateRef: Ref[IO, State]) =
     val uri = in.params.textDocument.uri.asNio
-    for
-      state <- stateRef.get
-      bloop = state.bloopConn.get.client
-      buildTarget <- inverseSource.get(
-        uri
-      ) // file may be owned by multiple targets eg. with crossbuild double check this
-      allTargets <- bloop.workspaceBuildTargets()
-      ourTarget = allTargets.targets.find(_.id == buildTarget)
-      _ <- logMessage(in.toClient, ourTarget.toString)
-      scalaBuildTarget = ourTarget.get
-      _     <- logMessage(in.toClient, scalaBuildTarget.toString)
-      _     <- logMessage(in.toClient, "completion start")
-      pc    <- pcProvider.get(ScalaVersion("3.7.0"))
-      state <- textDocumentSync.get(uri)
-      cs    <- state.getContent
-      params = in.params.toOffsetParams(cs)
-      _      <- logMessage(in.toClient, params.toString)
-      result <- IO.fromCompletableFuture(IO(pc.complete(params)))
-      _      <- logMessage(in.toClient, result.toString)
-    yield Opt(
-      structures.CompletionList(
-        result.isIncomplete(),
-        items = result
-          .getItems()
-          .asScala
-          .toVector
-          .map: i =>
-            structures.CompletionItem(
-              label = i.getLabel()
-            ),
+    cancelTokens.withCancelToken { token =>
+      for
+        state <- stateRef.get
+        bloop = state.bloopConn.get.client
+        buildTarget <- inverseSource.get(
+          uri
+        ) // file may be owned by multiple targets eg. with crossbuild double check this
+        allTargets <- bloop.workspaceBuildTargets()
+        ourTarget = allTargets.targets.find(_.id == buildTarget)
+        _ <- logMessage(in.toClient, ourTarget.toString)
+        scalaBuildTarget = ourTarget.get
+        _     <- logMessage(in.toClient, scalaBuildTarget.toString)
+        _     <- logMessage(in.toClient, "completion start")
+        pc    <- pcProvider.get(ScalaVersion("3.7.0"))
+        state <- textDocumentSync.get(uri)
+        cs    <- state.getContent
+
+        params = in.params.toOffsetParams(cs, token)
+        _      <- logMessage(in.toClient, params.toString)
+        result <- IO.fromCompletableFuture(IO(pc.complete(params)))
+        _      <- logMessage(in.toClient, result.toString)
+      yield Opt(
+        structures.CompletionList(
+          result.isIncomplete(),
+          items = result
+            .getItems()
+            .asScala
+            .toVector
+            .map: i =>
+              structures.CompletionItem(
+                label = i.getLabel()
+              ),
+        )
       )
-    )
+
+    }
 
   def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
     // for

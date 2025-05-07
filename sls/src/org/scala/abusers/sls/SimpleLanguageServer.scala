@@ -8,6 +8,7 @@ import jsonrpclib.fs2.catsMonadic
 import langoustine.lsp.*
 import langoustine.lsp.all.*
 import langoustine.lsp.app.*
+import org.scala.abusers.pc.IOCancelTokens
 import org.scala.abusers.pc.PresentationCompilerProvider
 
 case class State(files: Set[String], bloopConn: Option[BloopConnection]):
@@ -16,26 +17,27 @@ case class State(files: Set[String], bloopConn: Option[BloopConnection]):
 
 case class BloopConnection(client: BuildServer[IO], cancel: IO[Unit])
 
-object SimpleScalaServer extends LangoustineApp.Simple:
+object SimpleScalaServer extends LangoustineApp:
 
-  override def server =
+  override def server(args: List[String]): Resource[IO, LSPBuilder[IO]] =
     Resource
       .make(IO.ref(State(Set.empty, none)))(ref =>
         ref
           .getAndUpdate(_.copy(bloopConn = None))
           .map(_.release)
       )
-      .use(myLSP(using _))
-      .guaranteeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
+      .flatMap(myLSP(using _))
+      .onFinalizeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
-  private def myLSP(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
+  private def myLSP(using stateRef: Ref[IO, State]): Resource[IO, LSPBuilder[IO]] =
 
     for
-      textDocumentSync <- DocumentSyncManager.instance
-      pcProvider       <- PresentationCompilerProvider.instance
+      textDocumentSync <- DocumentSyncManager.instance.toResource
+      pcProvider       <- PresentationCompilerProvider.instance.toResource
       inverseSource <-
-        InverseSourcesToTarget.instance // move into bsp state manager // possible performance improvement to constant asking for inverse sources, leaving it for now
-      impl = ServerImpl(textDocumentSync, pcProvider, inverseSource)
+        InverseSourcesToTarget.instance.toResource // move into bsp state manager // possible performance improvement to constant asking for inverse sources, leaving it for now
+      cancelTokens <- IOCancelTokens.instance
+      impl = ServerImpl(textDocumentSync, pcProvider, inverseSource, cancelTokens)
     yield LSPBuilder
       .create[IO]
       .handleRequest(initialize)(impl.handleInitialize)
