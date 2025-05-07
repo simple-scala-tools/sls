@@ -10,9 +10,6 @@ import java.net.URI
 import scala.annotation.switch
 import scala.collection.mutable.ArrayBuffer
 
-object TextDocumentUtils:
-  extension (pos: Position) def toLine: Int = ???
-
 object Chars:
   inline val LF = '\u000A'
   inline val FF = '\u000C'
@@ -89,7 +86,8 @@ class DocumentSyncManager(val documents: Ref[IO, Map[URI, DocumentState]]):
       _   <- doc.processEdits(edits)
     yield ()
 
-  def get(uri: URI): IO[Option[DocumentState]] = documents.get.map(_.get(uri))
+  def get(uri: URI): IO[DocumentState] =
+    documents.get.flatMap(docs => IO.fromOption(docs.get(uri))(IllegalStateException()))
 
   private def getOrCreateDocument(uri: URI, content: Option[String]): IO[DocumentState] =
 
