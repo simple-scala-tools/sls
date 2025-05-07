@@ -1,6 +1,5 @@
 package org.scala.abusers.sls
 
-import bsp.*
 import cats.effect.*
 import cats.syntax.all.*
 import com.comcast.ip4s.*
@@ -9,7 +8,7 @@ import fs2.io.net.Network
 import jsonrpclib.fs2.*
 import smithy4sbsp.bsp4s.BSPCodecs
 
-def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Unit]): Resource[IO, BuildServer[IO]] =
+def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Unit]): Resource[IO, BuildServer] =
   Network[IO]
     .connect(UnixSocketAddress(path))
     .flatMap { socket =>
@@ -24,4 +23,11 @@ def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Un
         .guarantee(IO.consoleForIO.errorln("Terminating server"))
         .background
     }
-    .as(BSPCodecs.clientStub(BuildServer, channel))
+    .as(
+      BuildServer(
+        BSPCodecs.clientStub(bsp.BuildServer, channel),
+        BSPCodecs.clientStub(bsp.jvm.JvmBuildServer, channel),
+        BSPCodecs.clientStub(bsp.scala_.ScalaBuildServer, channel),
+        BSPCodecs.clientStub(bsp.java_.JavaBuildServer, channel),
+      )
+    )

@@ -17,6 +17,8 @@ import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.LspNioConverter.asNio
 
+import java.net.URI
+import java.nio.file.Paths
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
@@ -34,16 +36,29 @@ class ServerImpl(
         state <- stateRef.get
         _     <- logMessage(in.toClient, "completion start 2")
         bloop = state.bspClient.get
-        buildTarget <- inverseSource.get(uri) // file may be owned by multiple targets eg. with crossbuild double check this
-        allTargets <- bloop.workspaceBuildTargets()
-        ourTarget = allTargets.targets.find(_.id == buildTarget)
+        buildTargetsForFile <- inverseSource
+          .get(
+            uri
+          )
+          .map(_.toSet) // file may be owned by multiple targets eg. with crossbuild double check this
+        allTargets <- bloop.generic.workspaceBuildTargets()
+        _          <- logMessage(in.toClient, s"all targets:${allTargets.targets.map(_.id).mkString(", ")}")
+        // TODO: goto type definition with container types
+        _ <- logMessage(in.toClient, s"buildTargesForFile:${buildTargetsForFile.map(_.uri).mkString(", ")}")
+        ourTarget = allTargets.targets.collect {
+          case b if buildTargetsForFile.contains(b.id) => b
+        }
         // _ <- logMessage(in.toClient, ourTarget.toString)
-        scalaBuildTarget = ourTarget.get
-        // _     <- logMessage(in.toClient, scalaBuildTarget.toString)
-        _     <- logMessage(in.toClient, "completion start")
+        scalaBuildTarget = ourTarget.headOption.getOrElse(sys.error("our target not found"))
+        classpath <- bloop.scala.buildTargetScalacOptions(buildTargetsForFile.toList)
+        _         <- logMessage(in.toClient, classpath.items.flatMap(_.classpath).mkString(", "))
+        _         <- logMessage(in.toClient, "completion start")
         scalaVersion = scalaBuildTarget.project.scala.get.data.get.scalaVersion
-        classpath = bloop.buildInitialize
-        pc    <- pcProvider.get(ScalaVersion(scalaVersion), Nil)
+        // classpath    = bloop.generic.buildInitialize
+        pc <- pcProvider.get(
+          ScalaVersion(scalaVersion),
+          classpath.items.flatMap(c => c.classpath).map(str => Paths.get(URI(str))),
+        )
         state <- textDocumentSync.get(uri)
         cs    <- state.getContent
 
@@ -88,7 +103,7 @@ class ServerImpl(
       bloop = state.bspClient.get
       _           <- textDocumentSync.didSave(in)
       buildTarget <- inverseSource.get(in.params.textDocument.uri.asNio)
-      result      <- bloop.buildTargetCompile(buildTarget) // straight to jar here ?? TODO add ID
+      result      <- bloop.generic.buildTargetCompile(buildTarget) // straight to jar here ?? TODO add ID
     yield ()
 
   def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
@@ -96,7 +111,7 @@ class ServerImpl(
       state <- stateRef.get
       bloop = state.bspClient.get
       _ <- textDocumentSync.didOpen(in)
-      _ <- inverseSource.didOpen(bloop, in)
+      _ <- inverseSource.didOpen(bloop.generic, in)
     yield ()
 
   def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
@@ -115,7 +130,7 @@ class ServerImpl(
       _         <- importMillBsp(rootPath, in.toClient)
       bspClient <- connectWithBloop(in.toClient, steward)
       _         <- logMessage(in.toClient, "Connection with bloop estabilished")
-      response <- bspClient.buildInitialize(
+      response <- bspClient.generic.buildInitialize(
         displayName = "bloop",
         version = "0.0.0",
         bspVersion = "2.1.0",
@@ -123,7 +138,7 @@ class ServerImpl(
         capabilities = bsp.BuildClientCapabilities(languageIds = List(bsp.LanguageId("scala"))),
       )
       _ <- logMessage(in.toClient, s"Response from bsp: $response")
-      _ <- bspClient.onBuildInitialized()
+      _ <- bspClient.generic.onBuildInitialized()
       _ <- stateRef.update(_.withBspClient(bspClient))
     yield InitializeResult(
       capabilities = serverCapabilities,
@@ -133,10 +148,10 @@ class ServerImpl(
   private def serverCapabilities: ServerCapabilities =
     ServerCapabilities(
       textDocumentSync = Opt(enumerations.TextDocumentSyncKind.Incremental),
-      completionProvider = Opt(CompletionOptions(triggerCharacters = Opt(Vector("."))))
+      completionProvider = Opt(CompletionOptions(triggerCharacters = Opt(Vector(".")))),
     )
 
-  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[bsp.BuildServer[IO]] =
+  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer] =
     val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
     val socketFile = temp / s"bloop.socket"
     val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
