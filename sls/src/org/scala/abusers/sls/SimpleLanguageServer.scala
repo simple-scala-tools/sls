@@ -3,7 +3,6 @@ package org.scala.abusers.sls
 import bsp.BuildClientCapabilities
 import bsp.BuildServer
 import bsp.LanguageId
-import cats.data.OptionT
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.io.process.ProcessBuilder
@@ -20,30 +19,25 @@ import scala.concurrent.duration.*
 
 object SimpleScalaServer extends LangoustineApp.Simple:
 
-  private case class State(files: Set[String], bloopConn: Option[BloopConnection]):
-    def release: IO[Unit]                          = OptionT.fromOption[IO](bloopConn).semiflatTap(_.cancel).value.void
-    def withBloopConnection(conn: BloopConnection) = copy(bloopConn = Some(conn))
-
-  private case class BloopConnection(client: BuildServer[IO], cancel: IO[Unit])
+  private case class State(files: Set[String], bspClient: Option[BuildServer[IO]]):
+    def withBspClient(bspClient: BuildServer[IO]) = copy(bspClient = Some(bspClient))
 
   override def server =
-    Resource
-      .make(IO.ref(State(Set.empty, none)))(ref =>
-        ref
-          .getAndUpdate(_.copy(bloopConn = None))
-          .map(_.release)
-      )
-      .use(myLSP(using _))
+    ResourceSupervisor[IO]
+      .use { steward =>
+        IO.ref(State(Set.empty, none))
+          .flatMap(stateRef => myLSP(steward)(using stateRef))
+      }
       .guaranteeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
-  private def myLSP(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
+  private def myLSP(steward: ResourceSupervisor[IO])(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
 
     for
       textDocumentSync <- DocumentSyncManager.instance
       serviceLoader    <- BlockingServiceLoader.instance
     yield LSPBuilder
       .create[IO]
-      .handleRequest(initialize)(handleInitialize)
+      .handleRequest(initialize)(handleInitialize(steward))
       .handleNotification(textDocument.didOpen)(textDocumentSync.didOpen)
       .handleNotification(textDocument.didClose)(textDocumentSync.didClose)
       .handleNotification(textDocument.didChange)(textDocumentSync.didChange)
@@ -51,24 +45,26 @@ object SimpleScalaServer extends LangoustineApp.Simple:
         for
           _     <- textDocumentSync.didSave(in)
           state <- stateRef.get
-          bloop = state.bloopConn.get.client
-          targets <- bloop.workspaceBuildTargets()
+          bspClient = state.bspClient.get
+          targets <- bspClient.workspaceBuildTargets()
           targets0 = targets.targets.map(_.id)
           // ourTarget <- targets.targets.find(in.params.textDocument.uri)
-          result            <- bloop.buildTargetCompile(targets0)
+          result            <- bspClient.buildTargetCompile(targets0)
           _                 <- logMessage(in.toClient, s"${result}")
           generatedByMetals <- logMessage(in.toClient, s"Build targets: ${targets}")
         yield generatedByMetals
 
-  private def handleInitialize(in: Invocation[InitializeParams, IO])(using stateRef: Ref[IO, State]) =
+  private def handleInitialize(steward: ResourceSupervisor[IO])(in: Invocation[InitializeParams, IO])(using
+      stateRef: Ref[IO, State]
+  ) =
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
     val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
     (for
       _         <- sendMessage(in.toClient, "ready to initialise!")
       _         <- importMillBsp(rootPath, in.toClient)
-      bloopConn <- connectWithBloop(in.toClient)
+      bspClient <- connectWithBloop(in.toClient, steward)
       _         <- logMessage(in.toClient, "Connection with bloop estabilished")
-      response <- bloopConn.client.buildInitialize(
+      response <- bspClient.buildInitialize(
         displayName = "bloop",
         version = "0.0.0",
         bspVersion = "2.1.0",
@@ -76,8 +72,8 @@ object SimpleScalaServer extends LangoustineApp.Simple:
         capabilities = BuildClientCapabilities(languageIds = List(LanguageId("scala"))),
       )
       _ <- logMessage(in.toClient, s"Response from bsp: $response")
-      _ <- bloopConn.client.onBuildInitialized()
-      _ <- stateRef.update(_.withBloopConnection(bloopConn))
+      _ <- bspClient.onBuildInitialized()
+      _ <- stateRef.update(_.withBspClient(bspClient))
     yield InitializeResult(
       capabilities = serverCapabilities,
       serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
@@ -88,7 +84,7 @@ object SimpleScalaServer extends LangoustineApp.Simple:
       textDocumentSync = Opt(TextDocumentSyncKind.Incremental)
     )
 
-  private def connectWithBloop(back: Communicate[IO]): IO[BloopConnection] =
+  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer[IO]] =
     val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
     val socketFile = temp / s"bloop.socket"
     val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
@@ -106,13 +102,14 @@ object SimpleScalaServer extends LangoustineApp.Simple:
       }
       .as(socketFile)
 
-    (for
+    val bspClientRes = for
       socketPath <- bspProcess
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
       channel    <- FS2Channel.resource[IO]()
       client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, msg))
-    yield client).allocated
-      .map { case (client, cancel) => BloopConnection(client, cancel) }
+    yield client
+
+    steward.acquire(bspClientRes)
 
 def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
   val millExec = "./mill" // TODO if mising then findMillExec()
