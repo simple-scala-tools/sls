@@ -13,15 +13,15 @@ def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Un
   Network[IO]
     .connect(UnixSocketAddress(path))
     .flatMap { socket =>
-      BSPCodecs.clientStub(BuildServer, channel).toResource <*
-        fs2.Stream
-          .eval(IO.never)
-          .concurrently(
-            socket.reads.through(lsp.decodeMessages).evalTap(m => report(m.toString)).through(channel.inputOrBounce)
-          )
-          .concurrently(channel.output.through(lsp.encodeMessages).through(socket.writes))
-          .compile
-          .drain
-          .guarantee(IO.consoleForIO.errorln("Terminating server"))
-          .background
+      fs2.Stream
+        .eval(IO.never)
+        .concurrently(
+          socket.reads.through(lsp.decodeMessages).evalTap(m => report(m.toString)).through(channel.inputOrBounce)
+        )
+        .concurrently(channel.output.through(lsp.encodeMessages).through(socket.writes))
+        .compile
+        .drain
+        .guarantee(IO.consoleForIO.errorln("Terminating server"))
+        .background
     }
+    .as(BSPCodecs.clientStub(BuildServer, channel))
