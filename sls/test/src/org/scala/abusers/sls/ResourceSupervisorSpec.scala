@@ -6,7 +6,7 @@ import cats.effect.IO
 import cats.syntax.all.*
 import weaver.*
 
-object StewardSpec extends SimpleIOSuite:
+object ResourceSupervisorSpec extends SimpleIOSuite:
 
   test("steward should release as many times as it acquired") {
     (for
@@ -15,7 +15,7 @@ object StewardSpec extends SimpleIOSuite:
     yield (acquired, released))
       .flatMap { case (acquired, released) =>
 
-        Steward[IO]
+        ResourceSupervisor[IO]
           .use { steward =>
             val justSomeResource = Resource.make(acquired.update(_ + 1))(_ => released.update(_ + 1))
             (1 to 10).toList.map(_ => justSomeResource).traverse(steward.acquire)

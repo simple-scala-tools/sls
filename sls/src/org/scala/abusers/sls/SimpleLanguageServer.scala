@@ -23,14 +23,14 @@ object SimpleScalaServer extends LangoustineApp.Simple:
     def withBspClient(bspClient: BuildServer[IO]) = copy(bspClient = Some(bspClient))
 
   override def server =
-    Steward[IO]
+    ResourceSupervisor[IO]
       .use { steward =>
         IO.ref(State(Set.empty, none))
           .flatMap(stateRef => myLSP(steward)(using stateRef))
       }
       .guaranteeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
-  private def myLSP(steward: Steward[IO])(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
+  private def myLSP(steward: ResourceSupervisor[IO])(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
 
     for
       textDocumentSync <- DocumentSyncManager.instance
@@ -54,7 +54,7 @@ object SimpleScalaServer extends LangoustineApp.Simple:
           generatedByMetals <- logMessage(in.toClient, s"Build targets: ${targets}")
         yield generatedByMetals
 
-  private def handleInitialize(steward: Steward[IO])(in: Invocation[InitializeParams, IO])(using
+  private def handleInitialize(steward: ResourceSupervisor[IO])(in: Invocation[InitializeParams, IO])(using
       stateRef: Ref[IO, State]
   ) =
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
@@ -84,7 +84,7 @@ object SimpleScalaServer extends LangoustineApp.Simple:
       textDocumentSync = Opt(TextDocumentSyncKind.Incremental)
     )
 
-  private def connectWithBloop(back: Communicate[IO], steward: Steward[IO]): IO[BuildServer[IO]] =
+  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer[IO]] =
     val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
     val socketFile = temp / s"bloop.socket"
     val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
