@@ -29,7 +29,7 @@ class ServerImpl(
 
   def handleCompletion(in: Invocation[CompletionParams, IO])(using stateRef: Ref[IO, State]) =
     val uri = in.params.textDocument.uri.asNio
-    cancelTokens.withCancelToken { token =>
+    cancelTokens.mkCancelToken.use { token =>
       for
         state <- stateRef.get
         bloop = state.bloopConn.get.client
