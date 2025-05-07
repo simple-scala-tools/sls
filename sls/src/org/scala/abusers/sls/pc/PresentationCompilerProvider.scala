@@ -8,11 +8,14 @@ import java.io.File
 import java.net.URLClassLoader
 import scala.jdk.CollectionConverters.*
 import scala.meta.pc.PresentationCompiler
+import com.evolution.scache.Cache as SCache
+import bsp.BuildTargetIdentifier
+import com.evolution.scache.ExpiringCache
+import scala.concurrent.duration.*
 
-class PresentationCompilerProvider(serviceLoader: BlockingServiceLoader):
+class PresentationCompilerProvider(serviceLoader: BlockingServiceLoader, compilers: SCache[IO, ScalaVersion, PresentationCompiler]):
   import CoursiercatsInterop.*
   private val cache = FileCache[IO] // .withLogger TODO No completions here
-  // There should be com.evolution.Scache I can explain why later
 
   private def fetchPresentationCompilerJars(scalaVersion: ScalaVersion): IO[Seq[File]] =
     val dep = Dependency(
@@ -34,18 +37,27 @@ class PresentationCompilerProvider(serviceLoader: BlockingServiceLoader):
         val urlFullClasspath = fullClasspath.map(_.toURL)
         URLClassLoader(urlFullClasspath.toArray)
 
-  def get(scalaVersion: ScalaVersion) =
+  private def createPC(scalaVersion: ScalaVersion) =
     for
       compilerClasspath <- fetchPresentationCompilerJars(scalaVersion)
       classloader       <- freshPresentationCompilerClassloader(Nil, compilerClasspath)
       pc <- serviceLoader.load(classOf[PresentationCompiler], PresentationCompilerProvider.classname, classloader)
     yield pc.newInstance("random", compilerClasspath.map(_.toPath).asJava, Nil.asJava)
 
+  def get(scalaVersion: ScalaVersion): IO[PresentationCompiler] =
+    compilers.getOrUpdate(scalaVersion)(createPC(scalaVersion))
+
 object PresentationCompilerProvider:
   val classname = "dotty.tools.pc.ScalaPresentationCompiler"
 
   def instance: IO[PresentationCompilerProvider] =
-    BlockingServiceLoader.instance.map(PresentationCompilerProvider.apply)
+    for
+      serviceLoader <- BlockingServiceLoader.instance
+      pcProvider <- SCache.expiring[IO, ScalaVersion, PresentationCompiler]( // we will need to move this out because other services will want to manage the state of the cache and invalidate when configuration changes also this shoul be ModuleFingerprint or something like that
+        ExpiringCache.Config(expireAfterRead = 5.minutes),
+        None
+      ).use(cache => IO(PresentationCompilerProvider(serviceLoader, cache)))
+    yield pcProvider
 
 opaque type ScalaVersion = String
 
