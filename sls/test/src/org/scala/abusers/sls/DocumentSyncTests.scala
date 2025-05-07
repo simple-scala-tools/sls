@@ -53,7 +53,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.get.getContent
+      content <- doc.getContent
     yield expect.eql(expected = "val x = 1\nval y = 2", found = content)
 
   }
@@ -77,7 +77,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.get.getContent
+      content <- doc.getContent
     yield expect.eql(expected = "val x = 1\nval y = 2\nval z = 3", found = content)
 
   }
@@ -100,7 +100,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.get.getContent
+      content <- doc.getContent
     yield expect.eql(expected = "val x = 1\nval y = 2\n", found = content)
 
   }
@@ -123,7 +123,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.get.getContent
+      content <- doc.getContent
     yield expect.eql(expected = "val x = 1\np\nval z = 3", found = content)
 
   }

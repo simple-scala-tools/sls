@@ -26,4 +26,4 @@ class BlockingServiceLoader(mutex: Mutex[IO]):
               ctor.newInstance().asInstanceOf[T]
 
 object BlockingServiceLoader:
-  def instance: IO[BlockingServiceLoader] = Mutex[IO].map(BlockingServiceLoader.apply)
+  private[pc] def instance: IO[BlockingServiceLoader] = Mutex[IO].map(BlockingServiceLoader.apply)

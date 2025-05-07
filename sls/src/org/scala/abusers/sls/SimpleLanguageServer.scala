@@ -1,144 +1,44 @@
 package org.scala.abusers.sls
 
-import bsp.BuildClientCapabilities
 import bsp.BuildServer
+import cats.data.OptionT
 import bsp.LanguageId
 import cats.effect.*
 import cats.syntax.all.*
-import fs2.io.process.ProcessBuilder
-import fs2.io.process.Processes
-import fs2.text
 import jsonrpclib.fs2.catsMonadic
-import jsonrpclib.fs2.FS2Channel
 import langoustine.lsp.*
 import langoustine.lsp.all.*
 import langoustine.lsp.app.*
-import org.scala.abusers.pc.BlockingServiceLoader
+import org.scala.abusers.pc.IOCancelTokens
+import org.scala.abusers.pc.PresentationCompilerProvider
 
-import scala.concurrent.duration.*
+case class State(files: Set[String], bspClient: Option[BuildServer[IO]]):
+  def withBspClient(bspClient: BuildServer[IO]) = copy(bspClient = Some(bspClient))
 
-object SimpleScalaServer extends LangoustineApp.Simple:
+case class BloopConnection(client: BuildServer[IO], cancel: IO[Unit])
 
-  private case class State(files: Set[String], bspClient: Option[BuildServer[IO]]):
-    def withBspClient(bspClient: BuildServer[IO]) = copy(bspClient = Some(bspClient))
+object SimpleScalaServer extends LangoustineApp:
 
-  override def server =
-    ResourceSupervisor[IO]
-      .use { steward =>
-        IO.ref(State(Set.empty, none))
-          .flatMap(stateRef => myLSP(steward)(using stateRef))
-      }
-      .guaranteeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
+  override def server(args: List[String]): Resource[IO, LSPBuilder[IO]] =
+      (for
+        steward <- ResourceSupervisor[IO]
+        state   <- IO.ref(State(Set.empty, none)).toResource
+        lsp <- myLSP(steward)(using state)
+      yield lsp).onFinalizeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
-  private def myLSP(steward: ResourceSupervisor[IO])(using stateRef: Ref[IO, State]): IO[LSPBuilder[IO]] =
+  private def myLSP(steward: ResourceSupervisor[IO])(using stateRef: Ref[IO, State]): Resource[IO, LSPBuilder[IO]] =
 
     for
-      textDocumentSync <- DocumentSyncManager.instance
-      serviceLoader    <- BlockingServiceLoader.instance
+      textDocumentSync <- DocumentSyncManager.instance.toResource
+      pcProvider       <- PresentationCompilerProvider.instance.toResource
+      inverseSource <- InverseSourcesToTarget.instance.toResource // move into bsp state manager // possible performance improvement to constant asking for inverse sources, leaving it for now
+      cancelTokens <- IOCancelTokens.instance
+      impl = ServerImpl(textDocumentSync, pcProvider, inverseSource, cancelTokens)
     yield LSPBuilder
       .create[IO]
-      .handleRequest(initialize)(handleInitialize(steward))
-      .handleNotification(textDocument.didOpen)(textDocumentSync.didOpen)
-      .handleNotification(textDocument.didClose)(textDocumentSync.didClose)
-      .handleNotification(textDocument.didChange)(textDocumentSync.didChange)
-      .handleNotification(textDocument.didSave): in =>
-        for
-          _     <- textDocumentSync.didSave(in)
-          state <- stateRef.get
-          bspClient = state.bspClient.get
-          targets <- bspClient.workspaceBuildTargets()
-          targets0 = targets.targets.map(_.id)
-          // ourTarget <- targets.targets.find(in.params.textDocument.uri)
-          result            <- bspClient.buildTargetCompile(targets0)
-          _                 <- logMessage(in.toClient, s"${result}")
-          generatedByMetals <- logMessage(in.toClient, s"Build targets: ${targets}")
-        yield generatedByMetals
-
-  private def handleInitialize(steward: ResourceSupervisor[IO])(in: Invocation[InitializeParams, IO])(using
-      stateRef: Ref[IO, State]
-  ) =
-    val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
-    val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
-    (for
-      _         <- sendMessage(in.toClient, "ready to initialise!")
-      _         <- importMillBsp(rootPath, in.toClient)
-      bspClient <- connectWithBloop(in.toClient, steward)
-      _         <- logMessage(in.toClient, "Connection with bloop estabilished")
-      response <- bspClient.buildInitialize(
-        displayName = "bloop",
-        version = "0.0.0",
-        bspVersion = "2.1.0",
-        rootUri = bsp.URI(rootUri.value),
-        capabilities = BuildClientCapabilities(languageIds = List(LanguageId("scala"))),
-      )
-      _ <- logMessage(in.toClient, s"Response from bsp: $response")
-      _ <- bspClient.onBuildInitialized()
-      _ <- stateRef.update(_.withBspClient(bspClient))
-    yield InitializeResult(
-      capabilities = serverCapabilities,
-      serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
-    )).guaranteeCase(s => logMessage(in.toClient, s"closing initalize with $s"))
-
-  private def serverCapabilities: ServerCapabilities =
-    ServerCapabilities(
-      textDocumentSync = Opt(TextDocumentSyncKind.Incremental)
-    )
-
-  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer[IO]] =
-    val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
-    val socketFile = temp / s"bloop.socket"
-    val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
-      .spawn[IO]
-      .flatMap { bspSocketProc =>
-        bspSocketProc.stdout
-          .merge(bspSocketProc.stderr)
-          .through(text.utf8.decode)
-          .through(text.lines)
-          .evalMap(s => logMessage(back, s"[bloop] $s"))
-          .onFinalizeCase(c => sendMessage(back, s"Bloop process terminated $c"))
-          .compile
-          .drain
-          .background
-      }
-      .as(socketFile)
-
-    val bspClientRes = for
-      socketPath <- bspProcess
-      _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
-      channel    <- FS2Channel.resource[IO]()
-      client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, msg))
-    yield client
-
-    steward.acquire(bspClientRes)
-
-def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
-  val millExec = "./mill" // TODO if mising then findMillExec()
-  ProcessBuilder(millExec, "--import", "ivy:com.lihaoyi::mill-contrib-bloop:", "mill.contrib.bloop.Bloop/install")
-    .withWorkingDirectory(fs2.io.file.Path.fromNioPath(rootPath.toNIO))
-    .spawn[IO]
-    .use { process =>
-      val logStdout = process.stdout
-      val logStderr = process.stderr
-
-      val allOutput = logStdout
-        .merge(logStderr)
-        .through(text.utf8.decode)
-        .through(text.lines)
-
-      allOutput
-        .evalMap(s => logMessage(back, s))
-        .compile
-        .drain
-    }
-
-def sendMessage(back: Communicate[IO], msg: String): IO[Unit] =
-  back.notification(
-    window.showMessage,
-    ShowMessageParams(MessageType.Info, msg),
-  ) *> logMessage(back, msg)
-
-def logMessage(back: Communicate[IO], message: String): IO[Unit] =
-  back.notification(
-    window.logMessage,
-    LogMessageParams(MessageType.Info, message),
-  )
+      .handleRequest(initialize)(impl.handleInitialize(steward))
+      .handleNotification(textDocument.didOpen)(impl.handleDidOpen)
+      .handleNotification(textDocument.didClose)(impl.handleDidClose)
+      .handleNotification(textDocument.didChange)(impl.handleDidChange)
+      .handleNotification(textDocument.didSave)(impl.handleDidSave)
+      .handleRequest(textDocument.completion)(impl.handleCompletion)
