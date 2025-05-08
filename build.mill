@@ -16,7 +16,7 @@ trait CommonScalaModule extends ScalaModule with ScalafixModule {
     ) ++ super.repositoriesTask()
   }
 
-  def scalaVersion = "3.6.4"
+  def scalaVersion = "3.7.0"
 }
 
 object sls extends CommonScalaModule {

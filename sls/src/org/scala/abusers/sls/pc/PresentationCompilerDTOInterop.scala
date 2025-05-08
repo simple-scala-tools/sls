@@ -1,14 +1,19 @@
 package org.scala.abusers.pc
 
 import langoustine.lsp.structures.CompletionParams
+import org.eclipse.lsp4j.jsonrpc.json.MessageJsonHandler
 import org.scala.abusers.sls.Chars
+import upickle.default.*
 
 import java.net.URI
+import java.util.Collections
 import scala.collection.mutable.ArrayBuffer
 import scala.meta.pc.CancelToken
 import scala.meta.pc.OffsetParams
 
 object PresentationCompilerDTOInterop:
+  val gson =
+    MessageJsonHandler(Collections.emptyMap).getDefaultGsonBuilder().create()
 
   // We need to translate lsp4j / scalameta into langoustine and vice versa. It may be good idea to use chimney here
 
@@ -28,6 +33,9 @@ object PresentationCompilerDTOInterop:
       i += 1
     buf += cs.length // sentinel, so that findLine below works smoother
     buf.toArray
+
+    // FIXME VVVVV Missing completion for langoustine
+  def convert[In, Out: Reader](x: In): Out = read[Out](gson.toJson(x, x.getClass))
 
   extension (x: CompletionParams)
     def toOffsetParams(
