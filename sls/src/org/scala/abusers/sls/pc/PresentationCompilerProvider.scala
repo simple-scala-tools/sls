@@ -6,10 +6,10 @@ import com.evolution.scache.Cache as SCache
 import com.evolution.scache.ExpiringCache
 import coursier.*
 import coursier.cache.*
+import os.Path
 
 import java.io.File
 import java.net.URLClassLoader
-import java.nio.file.Path
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.meta.pc.PresentationCompiler
@@ -46,7 +46,7 @@ class PresentationCompilerProvider(
       compilerClasspath <- fetchPresentationCompilerJars(scalaVersion)
       classloader       <- freshPresentationCompilerClassloader(Nil, compilerClasspath)
       pc <- serviceLoader.load(classOf[PresentationCompiler], PresentationCompilerProvider.classname, classloader)
-    yield pc.newInstance("random", projectClasspath.asJava, Nil.asJava)
+    yield pc.newInstance("random", projectClasspath.map(_.toNIO).asJava, Nil.asJava)
 
   def get(scalaVersion: ScalaVersion, projectClasspath: List[Path]): IO[PresentationCompiler] =
     compilers.getOrUpdate(scalaVersion)(createPC(scalaVersion, projectClasspath))

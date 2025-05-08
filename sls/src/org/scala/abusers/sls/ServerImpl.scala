@@ -57,7 +57,7 @@ class ServerImpl(
         // classpath    = bloop.generic.buildInitialize
         pc <- pcProvider.get(
           ScalaVersion(scalaVersion),
-          classpath.items.flatMap(c => c.classpath).map(str => Paths.get(URI(str))),
+          classpath.items.flatMap(c => c.classpath).map(str => os.Path(URI(str))),
         )
         state <- textDocumentSync.get(uri)
         cs    <- state.getContent
