@@ -19,7 +19,6 @@ import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.LspNioConverter.asNio
 
 import java.net.URI
-import java.nio.file.Paths
 import scala.concurrent.duration.*
 
 class ServerImpl(
@@ -48,7 +47,7 @@ class ServerImpl(
             ScalaVersion(
               scalaVersion
             ), // change to something good like BuildTargetIdentifier and manage its state in e.g BspState with Map[BuildTargetIdentifier, BuildTarget]
-            classpath.items.flatMap(c => c.classpath).map(str => Paths.get(URI(str))),
+            classpath.items.flatMap(c => c.classpath).map(str => os.Path(URI(str))),
           )
           docState <- textDocumentSync.get(uri)
           cs       <- docState.getContent
