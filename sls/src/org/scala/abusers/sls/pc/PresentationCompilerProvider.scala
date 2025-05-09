@@ -1,6 +1,5 @@
 package org.scala.abusers.pc
 
-import bsp.BuildTargetIdentifier
 import cats.effect.IO
 import com.evolution.scache.Cache as SCache
 import com.evolution.scache.ExpiringCache

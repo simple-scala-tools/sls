@@ -2,7 +2,6 @@ package org.scala.abusers.sls
 
 import cats.effect.kernel.Ref
 import cats.effect.kernel.Resource
-import cats.effect.std.Dispatcher
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.io.process.ProcessBuilder
@@ -11,6 +10,8 @@ import jsonrpclib.fs2.FS2Channel
 import langoustine.lsp.*
 import langoustine.lsp.runtime.*
 import langoustine.lsp.structures.*
+import langoustine.lsp.structures as lngst
+import org.eclipse.lsp4j
 import org.scala.abusers.pc.IOCancelTokens
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
@@ -18,9 +19,7 @@ import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.LspNioConverter.asNio
 
 import java.net.URI
-import java.nio.file.Paths
 import scala.concurrent.duration.*
-import scala.jdk.CollectionConverters.*
 
 class ServerImpl(
     textDocumentSync: DocumentSyncManager,
@@ -31,56 +30,30 @@ class ServerImpl(
 
   def handleCompletion(in: Invocation[CompletionParams, IO])(using stateRef: Ref[IO, State]) =
     val uri = in.params.textDocument.uri.asNio
-    cancelTokens.mkCancelToken.use { token =>
-      for
-        state <- stateRef.get
-        _     <- logMessage(in.toClient, "completion start 2")
-        bloop = state.bspClient.get
-        buildTargetsForFile <- inverseSource
-          .get(
-            uri
+    cancelTokens.mkCancelToken.use: token =>
+        for
+          state <- stateRef.get
+          bloop = state.bspClient.get
+          buildTargetsForFile <- inverseSource
+            .get(uri)
+            .map(_.toSet) // file may be owned by multiple targets eg. with crossbuild double check this
+          allTargets <- bloop.generic.workspaceBuildTargets()
+          // TODO: goto type definition with container types
+          ourTarget        = allTargets.targets.collect { case b if buildTargetsForFile.contains(b.id) => b }
+          scalaBuildTarget = ourTarget.headOption.getOrElse(sys.error("our target not found"))
+          classpath <- bloop.scala.buildTargetScalacOptions(buildTargetsForFile.toList)
+          scalaVersion = scalaBuildTarget.project.scala.get.data.get.scalaVersion
+          pc <- pcProvider.get(
+            ScalaVersion(
+              scalaVersion
+            ), // change to something good like BuildTargetIdentifier and manage its state in e.g BspState with Map[BuildTargetIdentifier, BuildTarget]
+            classpath.items.flatMap(c => c.classpath).map(str => os.Path(URI(str))),
           )
-          .map(_.toSet) // file may be owned by multiple targets eg. with crossbuild double check this
-        allTargets <- bloop.generic.workspaceBuildTargets()
-        _          <- logMessage(in.toClient, s"all targets:${allTargets.targets.map(_.id).mkString(", ")}")
-        // TODO: goto type definition with container types
-        _ <- logMessage(in.toClient, s"buildTargesForFile:${buildTargetsForFile.map(_.uri).mkString(", ")}")
-        ourTarget = allTargets.targets.collect {
-          case b if buildTargetsForFile.contains(b.id) => b
-        }
-        // _ <- logMessage(in.toClient, ourTarget.toString)
-        scalaBuildTarget = ourTarget.headOption.getOrElse(sys.error("our target not found"))
-        classpath <- bloop.scala.buildTargetScalacOptions(buildTargetsForFile.toList)
-        _         <- logMessage(in.toClient, classpath.items.flatMap(_.classpath).mkString(", "))
-        _         <- logMessage(in.toClient, "completion start")
-        scalaVersion = scalaBuildTarget.project.scala.get.data.get.scalaVersion
-        // classpath    = bloop.generic.buildInitialize
-        pc <- pcProvider.get(
-          ScalaVersion(scalaVersion),
-          classpath.items.flatMap(c => c.classpath).map(str => os.Path(URI(str))),
-        )
-        state <- textDocumentSync.get(uri)
-        cs    <- state.getContent
-
-        params = in.params.toOffsetParams(cs, token)
-        _      <- logMessage(in.toClient, params.toString)
-        result <- IO.fromCompletableFuture(IO(pc.complete(params)))
-        _      <- logMessage(in.toClient, result.toString)
-      yield Opt(
-        structures.CompletionList(
-          result.isIncomplete(),
-          items = result
-            .getItems()
-            .asScala
-            .toVector
-            .map: i =>
-              structures.CompletionItem(
-                label = i.getLabel()
-              ),
-        )
-      )
-
-    }
+          docState <- textDocumentSync.get(uri)
+          cs       <- docState.getContent
+          params = in.params.toOffsetParams(cs, token)
+          result <- IO.fromCompletableFuture(IO(pc.complete(params)))
+        yield Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
 
   def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
     // for
