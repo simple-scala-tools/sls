@@ -7,7 +7,6 @@ import coursier.*
 import coursier.cache.*
 import os.Path
 
-import java.io.File
 import java.net.URLClassLoader
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -20,7 +19,7 @@ class PresentationCompilerProvider(
   import CoursiercatsInterop.*
   private val cache = FileCache[IO] // .withLogger TODO No completions here
 
-  private def fetchPresentationCompilerJars(scalaVersion: ScalaVersion): IO[Seq[File]] =
+  private def fetchPresentationCompilerJars(scalaVersion: ScalaVersion): IO[Seq[os.Path]] =
     val dep = Dependency(
       Module(Organization("org.scala-lang"), ModuleName("scala3-presentation-compiler_3")),
       scalaVersion.value,
@@ -30,14 +29,15 @@ class PresentationCompilerProvider(
       .addDependencies(dep)
       .addRepositories( /* load from user config */ )
       .io
+      .map(_.map(os.Path(_)))
 
   private def freshPresentationCompilerClassloader(
-      projectClasspath: Seq[File],
-      compilerClasspath: Seq[File],
+      projectClasspath: Seq[os.Path],
+      compilerClasspath: Seq[os.Path],
   ): IO[URLClassLoader] =
     IO.blocking:
         val fullClasspath    = compilerClasspath ++ projectClasspath
-        val urlFullClasspath = fullClasspath.map(_.toURL)
+        val urlFullClasspath = fullClasspath.map(_.toIO.toURL)
         URLClassLoader(urlFullClasspath.toArray)
 
   private def createPC(scalaVersion: ScalaVersion, projectClasspath: List[Path]) =
