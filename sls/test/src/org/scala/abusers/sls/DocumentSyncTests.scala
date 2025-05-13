@@ -102,7 +102,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
 
   }
 
-  loggedTest("applies incremental document change with multi line change".only) { log =>
+  loggedTest("applies incremental document change with multi line change") { log =>
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
     for
