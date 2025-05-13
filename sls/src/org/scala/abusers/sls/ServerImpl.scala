@@ -1,5 +1,6 @@
 package org.scala.abusers.sls
 
+import bsp.BuildClient
 import cats.effect.kernel.Ref
 import cats.effect.kernel.Resource
 import cats.effect.IO
@@ -17,6 +18,7 @@ import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.LspNioConverter.asNio
+import smithy4sbsp.bsp4s.BSPCodecs
 
 import java.net.URI
 import scala.concurrent.duration.*
@@ -145,8 +147,8 @@ class ServerImpl(
     val bspClientRes = for
       socketPath <- bspProcess
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
-      channel    <- FS2Channel.resource[IO]()
-      client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, msg))
+      channel    <- FS2Channel.resource[IO]().flatMap(_.withEndpoints(bspClientHandler(back)))
+      client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
     yield client
 
     steward.acquire(bspClientRes)
