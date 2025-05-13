@@ -50,8 +50,7 @@ class ServerImpl(
             classpath.items.flatMap(c => c.classpath).map(str => os.Path(URI(str))),
           )
           docState <- textDocumentSync.get(uri)
-          cs       <- docState.getContent
-          params = in.params.toOffsetParams(cs, token)
+          params = in.params.toOffsetParams(docState, token)
           result <- IO.fromCompletableFuture(IO(pc.complete(params)))
         yield Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
 
