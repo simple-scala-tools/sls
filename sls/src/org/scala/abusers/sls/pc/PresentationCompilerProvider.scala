@@ -1,10 +1,13 @@
 package org.scala.abusers.pc
 
+import bsp.BuildTargetIdentifier
 import cats.effect.IO
 import com.evolution.scache.Cache as SCache
 import com.evolution.scache.ExpiringCache
 import coursier.*
 import coursier.cache.*
+import org.scala.abusers.sls.ScalaBuildTargetInformation
+import org.scala.abusers.sls.ScalaBuildTargetInformation.*
 import os.Path
 
 import java.net.URLClassLoader
@@ -14,7 +17,7 @@ import scala.meta.pc.PresentationCompiler
 
 class PresentationCompilerProvider(
     serviceLoader: BlockingServiceLoader,
-    compilers: SCache[IO, ScalaVersion, PresentationCompiler],
+    compilers: SCache[IO, BuildTargetIdentifier, PresentationCompiler],
 ):
   import CoursiercatsInterop.*
   private val cache = FileCache[IO] // .withLogger TODO No completions here
@@ -40,15 +43,15 @@ class PresentationCompilerProvider(
         val urlFullClasspath = fullClasspath.map(_.toIO.toURL)
         URLClassLoader(urlFullClasspath.toArray)
 
-  private def createPC(scalaVersion: ScalaVersion, projectClasspath: List[Path]) =
+  private def createPC(scalaVersion: ScalaVersion, projectClasspath: List[Path], scalacOptions: List[String]) =
     for
       compilerClasspath <- fetchPresentationCompilerJars(scalaVersion)
       classloader       <- freshPresentationCompilerClassloader(Nil, compilerClasspath)
       pc <- serviceLoader.load(classOf[PresentationCompiler], PresentationCompilerProvider.classname, classloader)
-    yield pc.newInstance("random", projectClasspath.map(_.toNIO).asJava, Nil.asJava)
+    yield pc.newInstance("random", projectClasspath.map(_.toNIO).asJava, scalacOptions.asJava)
 
-  def get(scalaVersion: ScalaVersion, projectClasspath: List[Path]): IO[PresentationCompiler] =
-    compilers.getOrUpdate(scalaVersion)(createPC(scalaVersion, projectClasspath))
+  def get(info: ScalaBuildTargetInformation): IO[PresentationCompiler] =
+    compilers.getOrUpdate(info.buildTarget.id)(createPC(info.scalaVersion, info.classpath, info.compilerOptions))
 
 object PresentationCompilerProvider:
   val classname = "dotty.tools.pc.ScalaPresentationCompiler"
@@ -57,7 +60,7 @@ object PresentationCompilerProvider:
     for
       serviceLoader <- BlockingServiceLoader.instance
       pcProvider <- SCache
-        .expiring[IO, ScalaVersion, PresentationCompiler]( // we will need to move this out because other services will want to manage the state of the cache and invalidate when configuration changes also this shoul be ModuleFingerprint or something like that
+        .expiring[IO, BuildTargetIdentifier, PresentationCompiler]( // we will need to move this out because other services will want to manage the state of the cache and invalidate when configuration changes also this shoul be ModuleFingerprint or something like that
           ExpiringCache.Config(expireAfterRead = 5.minutes),
           None,
         )
