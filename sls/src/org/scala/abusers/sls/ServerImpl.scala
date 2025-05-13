@@ -1,6 +1,5 @@
 package org.scala.abusers.sls
 
-import bsp.BuildClient
 import cats.effect.kernel.Ref
 import cats.effect.kernel.Resource
 import cats.effect.IO
@@ -18,7 +17,6 @@ import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.LspNioConverter.asNio
-import smithy4sbsp.bsp4s.BSPCodecs
 
 import java.net.URI
 import scala.concurrent.duration.*
