@@ -46,7 +46,7 @@ class PresentationCompilerProvider(
   private def createPC(scalaVersion: ScalaVersion, projectClasspath: List[Path], scalacOptions: List[String]) =
     for
       compilerClasspath <- fetchPresentationCompilerJars(scalaVersion)
-      classloader       <- freshPresentationCompilerClassloader(Nil, compilerClasspath)
+      classloader       <- freshPresentationCompilerClassloader(projectClasspath, compilerClasspath)
       pc <- serviceLoader.load(classOf[PresentationCompiler], PresentationCompilerProvider.classname, classloader)
     yield pc.newInstance("random", projectClasspath.map(_.toNIO).asJava, scalacOptions.asJava)
 
@@ -72,4 +72,31 @@ opaque type ScalaVersion = String
 extension (scalaVersion: ScalaVersion) def value: String = scalaVersion
 
 object ScalaVersion:
+  private val versionRegex = "\\d+(?:[_.-]\\d+)*".r
+  private val separators = Array('.', '-', '_')
+
   def apply(scalaVersion: String): ScalaVersion = scalaVersion
+  given Ordering[ScalaVersion] = new Ordering[ScalaVersion]:
+    def compareParts(x: String, y: String): Int =
+      (x.headOption, y.headOption) match
+        case (Some(c1), Some(c2)) if (c1.isDigit && c2.isDigit) =>
+          val match1 = versionRegex.findFirstIn(x).get
+          val match2 = versionRegex.findFirstIn(y).get
+
+          val parts1 = match1.split(separators)
+          val parts2 = match2.split(separators)
+
+          val comparisonResult = (parts1 zip parts2).find { case (xs, ys) => xs != ys } match
+            case Some((x, y)) => x.toInt compare y.toInt
+            case None         => parts1.length compare parts2.length
+
+          if (comparisonResult == 0) compareParts(x.drop(match1.length max 1), y.drop(match2.length max 1))
+          else comparisonResult
+        case (Some(c1), Some(c2)) =>
+          val comparisonResult = c1 compare c2
+          if (comparisonResult == 0) compareParts(x.tail, y.tail) else comparisonResult
+        case _ => x compare y
+
+    override def compare(x: ScalaVersion, y: ScalaVersion): Int =
+      compareParts(x.value, y.value)
+

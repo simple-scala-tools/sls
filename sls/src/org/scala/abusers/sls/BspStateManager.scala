@@ -47,19 +47,27 @@ class BspStateManager(
     sourcesToTargets: MapRef[IO, URI, Option[ScalaBuildTargetInformation]],
     targets: Ref[IO, Set[ScalaBuildTargetInformation]],
 ):
+  import ScalaBuildTargetInformation.*
 
   def importBuild =
     for
       bspServer0    <- bspServer.get
       importedBuild <- getBuildInformation(bspServer0)
+      _             <- bspServer0.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
       _             <- targets.set(importedBuild)
     yield ()
+
+  val byScalaVersion: Ordering[ScalaBuildTargetInformation] = new Ordering[ScalaBuildTargetInformation]:
+    override def compare(x: ScalaBuildTargetInformation, y: ScalaBuildTargetInformation): Int =
+      Ordering[ScalaVersion].compare(x.scalaVersion, y.scalaVersion)
 
   def getBuildInformation(bspServer: BuildServer): IO[Set[ScalaBuildTargetInformation]] =
     for
       workspaceBuildTargets <- bspServer.generic.workspaceBuildTargets()
       scalacOptions         <- bspServer.scala.buildTargetScalacOptions(workspaceBuildTargets.targets.map(_.id)) //
     yield zip(workspaceBuildTargets, scalacOptions)
+      .groupMapReduce(_.buildTarget.id)(identity)(byScalaVersion.max)
+      .values.toSet
 
   def buildTargetInverseSources(uri: URI): IO[List[bsp.BuildTargetIdentifier]] =
     for
@@ -105,12 +113,13 @@ class BspStateManager(
     yield ()
 
   // to be used in the future
-  def didChangeConfiguration =
-    for
-      bspServer0       <- bspServer.get
-      buildInformation <- getBuildInformation(bspServer0)
-      _                <- targets.set(buildInformation)
-    yield ()
+  // def didChangeConfiguration =
+  //   for
+  //     bspServer0       <- bspServer.get
+  //     importedBuild <- getBuildInformation(bspServer0)
+  //     _             <- bspServer0.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
+  //     _                <- targets.set(importedBuild)
+  //   yield ()
 
   // didRename
   // didRemove
