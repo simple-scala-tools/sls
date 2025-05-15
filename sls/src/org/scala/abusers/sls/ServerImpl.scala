@@ -126,8 +126,10 @@ class ServerImpl(
     val bspClientRes = for
       socketPath <- bspProcess
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
-      channel    <- FS2Channel.resource[IO]().flatMap(_.withEndpoints(bspClientHandler(back)))
-      client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
+      channel    <- FS2Channel.resource[IO]()
+      // TODO: bsp4s is currently broken (diagnostics result sent from server can't be parsed). When it's fixed, restore this
+      // .flatMap(_.withEndpoints(bspClientHandler(back)))
+      client <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
     yield client
 
     steward.acquire(bspClientRes)

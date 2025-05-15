@@ -48,65 +48,65 @@ def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Un
       )
     )
 
-def bspClientHandler(lspClient: Communicate[IO]): List[Endpoint[IO]] = Nil
-  // BSPCodecs.serverEndpoints(
-  // new BuildClient[IO]:
-  //   private def notify(msg: String) =
-  //     lspClient.notification(
-  //       window.showMessage(ShowMessageParams(`type` = langoustine.lsp.enumerations.MessageType.Info, message = msg))
-  //     )
+def bspClientHandler(lspClient: Communicate[IO]): List[Endpoint[IO]] =
+  BSPCodecs.serverEndpoints(
+    new BuildClient[IO]:
+      private def notify(msg: String) =
+        lspClient.notification(
+          window.showMessage(ShowMessageParams(`type` = langoustine.lsp.enumerations.MessageType.Info, message = msg))
+        )
 
-  //   override def onBuildLogMessage(
-  //       _type: MessageType,
-  //       message: String,
-  //       task: Option[TaskId],
-  //       originId: Option[OriginId],
-  //   ): IO[Unit] = notify(s"handling onBuildLogMessage: $_type, $message, $task, $originId")
+      override def onBuildLogMessage(
+          _type: MessageType,
+          message: String,
+          task: Option[TaskId],
+          originId: Option[OriginId],
+      ): IO[Unit] = notify(s"handling onBuildLogMessage: $_type, $message, $task, $originId")
 
-  //   def onBuildPublishDiagnostics(
-  //       textDocument: TextDocumentIdentifier,
-  //       buildTarget: BuildTargetIdentifier,
-  //       diagnostics: List[Diagnostic],
-  //       reset: Boolean,
-  //       originId: Option[OriginId],
-  //   ): IO[Unit] =
-  //     notify(
-  //       s"handling onBuildPublishDiagnostics: $textDocument, $buildTarget, $diagnostics, $reset, $originId"
-  //     )
+      def onBuildPublishDiagnostics(
+          textDocument: TextDocumentIdentifier,
+          buildTarget: BuildTargetIdentifier,
+          diagnostics: List[Diagnostic],
+          reset: Boolean,
+          originId: Option[OriginId],
+      ): IO[Unit] =
+        notify(
+          s"handling onBuildPublishDiagnostics: $textDocument, $buildTarget, $diagnostics, $reset, $originId"
+        )
 
-  //   def onBuildShowMessage(
-  //       _type: MessageType,
-  //       message: String,
-  //       task: Option[TaskId],
-  //       originId: Option[OriginId],
-  //   ): IO[Unit] =
-  //     notify(s"handling onBuildShowMessage: $_type, $message, $task, $originId")
+      def onBuildShowMessage(
+          _type: MessageType,
+          message: String,
+          task: Option[TaskId],
+          originId: Option[OriginId],
+      ): IO[Unit] =
+        notify(s"handling onBuildShowMessage: $_type, $message, $task, $originId")
 
-  //   def onBuildTargetDidChange(changes: List[BuildTargetEvent]): IO[Unit] =
-  //     notify(s"handling onBuildTargetDidChange: $changes")
+      def onBuildTargetDidChange(changes: List[BuildTargetEvent]): IO[Unit] =
+        notify(s"handling onBuildTargetDidChange: $changes")
 
-  //   def onBuildTaskFinish(data: TaskFinishParams): IO[Unit] =
-  //     notify(s"handling onBuildTaskFinish: $data")
+      def onBuildTaskFinish(data: TaskFinishParams): IO[Unit] =
+        notify(s"handling onBuildTaskFinish: $data")
 
-  //   def onBuildTaskProgress(
-  //       taskId: TaskId,
-  //       originId: Option[Identifier],
-  //       eventTime: Option[bsp.Long],
-  //       message: Option[String],
-  //       total: Option[bsp.Long],
-  //       progress: Option[bsp.Long],
-  //       unit: Option[String],
-  //       data: Option[TaskProgressData],
-  //   ): IO[Unit] =
-  //     notify(
-  //       s"handling onBuildTaskProgress: $taskId, $originId, $eventTime, $message, $total, $progress, $unit, $data"
-  //     )
+      def onBuildTaskProgress(
+          taskId: TaskId,
+          originId: Option[Identifier],
+          eventTime: Option[bsp.Long],
+          message: Option[String],
+          total: Option[bsp.Long],
+          progress: Option[bsp.Long],
+          unit: Option[String],
+          data: Option[TaskProgressData],
+      ): IO[Unit] =
+        notify(
+          s"handling onBuildTaskProgress: $taskId, $originId, $eventTime, $message, $total, $progress, $unit, $data"
+        )
 
-  //   def onBuildTaskStart(data: TaskStartParams): IO[Unit] =
-  //     notify(s"handling onBuildTaskStart: $data")
-  //   def onRunPrintStderr(originId: Identifier, message: String, task: Option[TaskId]): IO[Unit] =
-  //     notify(s"handling onRunPrintStderr: $originId, $message, $task")
+      def onBuildTaskStart(data: TaskStartParams): IO[Unit] =
+        notify(s"handling onBuildTaskStart: $data")
+      def onRunPrintStderr(originId: Identifier, message: String, task: Option[TaskId]): IO[Unit] =
+        notify(s"handling onRunPrintStderr: $originId, $message, $task")
 
-  //   def onRunPrintStdout(originId: Identifier, message: String, task: Option[TaskId]): IO[Unit] =
-  //     notify(s"handling onRunPrintStdout: $originId, $message, $task")
-// )
+      def onRunPrintStdout(originId: Identifier, message: String, task: Option[TaskId]): IO[Unit] =
+        notify(s"handling onRunPrintStdout: $originId, $message, $task")
+  )
