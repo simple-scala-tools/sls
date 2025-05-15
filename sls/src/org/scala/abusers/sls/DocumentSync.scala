@@ -1,6 +1,7 @@
 package org.scala.abusers.sls // TODO package completions are still here when they should not, also we should get whole package completion out of the box
 
 import cats.effect.*
+import cats.effect.std.MapRef
 import cats.syntax.all.*
 import langoustine.lsp.aliases.TextDocumentContentChangeEvent
 import langoustine.lsp.structures.*
@@ -9,7 +10,6 @@ import langoustine.lsp.Invocation
 import java.net.URI
 import scala.annotation.switch
 import scala.collection.mutable.ArrayBuffer
-import cats.effect.std.MapRef
 
 object Chars:
   inline val LF = '\u000A'
@@ -21,7 +21,6 @@ object Chars:
   def isLineBreakChar(c: Char): Boolean = (c: @switch) match
     case LF | FF | CR | SU => true
     case _                 => false
-
 
 case class DocumentState(content: String):
   // We could have implemented incremental linesCache updating based on textEdits, but I believe this will not cause any performance bottlenecks.
@@ -88,7 +87,8 @@ class DocumentSyncManager(val documents: MapRef[IO, URI, Option[DocumentState]])
 
   private def getOrCreateDocument(uri: URI, content: Option[String]): IO[DocumentState] =
     val content0 = content.getOrElse("")
-    documents(uri).updateAndGet:
-      case Some(existing) => Some(existing)
-      case None =>           Some(new DocumentState(content0))
-    .map(_.get)
+    documents(uri)
+      .updateAndGet:
+        case Some(existing) => Some(existing)
+        case None           => Some(new DocumentState(content0))
+      .map(_.get)

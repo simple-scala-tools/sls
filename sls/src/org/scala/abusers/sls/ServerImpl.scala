@@ -1,6 +1,6 @@
 package org.scala.abusers.sls
 
-import cats.effect.kernel.Ref
+import cats.effect.kernel.Deferred
 import cats.effect.kernel.Resource
 import cats.effect.IO
 import cats.syntax.all.*
@@ -15,45 +15,30 @@ import org.eclipse.lsp4j
 import org.scala.abusers.pc.IOCancelTokens
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
-import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.LspNioConverter.asNio
 
-import java.net.URI
+import scala.concurrent.duration.*
 
 class ServerImpl(
     textDocumentSync: DocumentSyncManager,
     pcProvider: PresentationCompilerProvider,
-    inverseSource: InverseSourcesToTarget,
+    bspStateManager: BspStateManager,
     cancelTokens: IOCancelTokens,
 ):
 
-  def handleCompletion(in: Invocation[CompletionParams, IO])(using stateRef: Ref[IO, State]) =
+  // TODO: goto type definition with container types
+  def handleCompletion(in: Invocation[CompletionParams, IO]) =
     val uri = in.params.textDocument.uri.asNio
     cancelTokens.mkCancelToken.use: token =>
         for
-          state <- stateRef.get
-          bloop = state.bspClient.get
-          buildTargetsForFile <- inverseSource
-            .get(uri)
-            .map(_.toSet) // file may be owned by multiple targets eg. with crossbuild double check this
-          allTargets <- bloop.generic.workspaceBuildTargets()
-          // TODO: goto type definition with container types
-          ourTarget        = allTargets.targets.collect { case b if buildTargetsForFile.contains(b.id) => b }
-          scalaBuildTarget = ourTarget.headOption.getOrElse(sys.error("our target not found"))
-          classpath <- bloop.scala.buildTargetScalacOptions(buildTargetsForFile.toList)
-          scalaVersion = scalaBuildTarget.project.scala.get.data.get.scalaVersion
-          pc <- pcProvider.get(
-            ScalaVersion(
-              scalaVersion
-            ), // change to something good like BuildTargetIdentifier and manage its state in e.g BspState with Map[BuildTargetIdentifier, BuildTarget]
-            classpath.items.flatMap(c => c.classpath).map(str => os.Path(URI(str))),
-          )
+          info     <- bspStateManager.get(uri)
+          pc       <- pcProvider.get(info)
           docState <- textDocumentSync.get(uri)
           params = in.params.toOffsetParams(docState, token)
           result <- IO.fromCompletableFuture(IO(pc.complete(params)))
         yield Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
 
-  def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
+  def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO]) =
     // for
     //   _     <- textDocumentSync.didSave(in)
     //   state <- stateRef.get
@@ -70,29 +55,27 @@ class ServerImpl(
     //   generatedByMetals <- logMessage(in.toClient, s"Build target: ${buildTarget}")
     // yield generatedByMetals
     for
-      state <- stateRef.get
-      bloop = state.bspClient.get
-      _           <- textDocumentSync.didSave(in)
-      buildTarget <- inverseSource.get(in.params.textDocument.uri.asNio)
-      result      <- bloop.generic.buildTargetCompile(buildTarget) // straight to jar here ?? TODO add ID
+      _    <- textDocumentSync.didSave(in)
+      info <- bspStateManager.get(in.params.textDocument.uri.asNio)
+      _ <- bspStateManager.bspServer.generic.buildTargetCompile(
+        List(info.buildTarget.id)
+      ) // straight to jar here ?? TODO add ID
     yield ()
 
-  def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
+  def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO]) =
     for
-      state <- stateRef.get
-      bloop = state.bspClient.get
       _ <- textDocumentSync.didOpen(in)
-      _ <- inverseSource.didOpen(bloop.generic, in)
+      _ <- bspStateManager.didOpen(in)
     yield ()
 
-  def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
+  def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO]) =
     textDocumentSync.didClose(in)
 
-  def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO])(using stateRef: Ref[IO, State]) =
+  def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]) =
     textDocumentSync.didChange(in)
 
-  def handleInitialize(steward: ResourceSupervisor[IO])(in: Invocation[InitializeParams, IO])(using
-      stateRef: Ref[IO, State]
+  def handleInitialize(steward: ResourceSupervisor[IO], bspClientDeferred: Deferred[IO, BuildServer])(
+      in: Invocation[InitializeParams, IO]
   ) =
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
     val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
@@ -110,7 +93,8 @@ class ServerImpl(
       )
       _ <- logMessage(in.toClient, s"Response from bsp: $response")
       _ <- bspClient.generic.onBuildInitialized()
-      _ <- stateRef.update(_.withBspClient(bspClient))
+      _ <- bspClientDeferred.complete(bspClient)
+      _ <- bspStateManager.importBuild
     yield InitializeResult(
       capabilities = serverCapabilities,
       serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
@@ -155,9 +139,11 @@ class ServerImpl(
 
     val bspClientRes = for
       socketPath <- bspProcess
-      _          <- logMessage(back, s"Looking for socket at $socketPath").toResource
-      channel    <- FS2Channel.resource[IO]().flatMap(_.withEndpoints(bspClientHandler(back)))
-      client     <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
+      _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
+      channel    <- FS2Channel.resource[IO]()
+      // TODO: bsp4s is currently broken (diagnostics result sent from server can't be parsed). When it's fixed, restore this
+      // .flatMap(_.withEndpoints(bspClientHandler(back)))
+      client <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
     yield client
 
     steward.acquire(bspClientRes)
