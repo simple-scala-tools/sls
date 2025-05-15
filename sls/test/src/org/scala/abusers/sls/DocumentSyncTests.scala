@@ -53,8 +53,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.getContent
-    yield expect.eql(expected = "val x = 1\nval y = 2", found = content)
+    yield expect.eql(expected = "val x = 1\nval y = 2", found = doc.content)
 
   }
 
@@ -77,8 +76,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.getContent
-    yield expect.eql(expected = "val x = 1\nval y = 2\nval z = 3", found = content)
+    yield expect.eql(expected = "val x = 1\nval y = 2\nval z = 3", found = doc.content)
 
   }
 
@@ -100,10 +98,32 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.getContent
-    yield expect.eql(expected = "val x = 1\nval y = 2\n", found = content)
+    yield expect.eql(expected = "val x = 1\nval y = 2\n", found = doc.content)
 
   }
+
+  loggedTest("applies incremental document change with multi line change") { log =>
+    val uri    = DocumentUri("/home/Test.scala")
+    val client = TestClient(log)
+    for
+      mgr <- DocumentSyncManager.instance
+      _   <- mgr.didOpen(client.input(open(uri, "val x = 1\nval y = 2\nval z = 3")))
+
+      // full document replacement
+      _ <- mgr.didChange(
+        client.input(
+          DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(version = 1, uri = uri),
+            contentChanges = Vector(makeChange(startLine = 1, startChar = 9, endLine = 1, endChar = 9, text = "\nval xx = 3\nval yy = 4\n")),
+          )
+        )
+      )
+
+      doc     <- mgr.get(uri.asNio)
+    yield
+      expect.eql(expected = "val x = 1\nval y = 2\nval xx = 3\nval yy = 4\n\nval z = 3", found = doc.content)
+  }
+
 
   loggedTest("applies incremental document change with selection") { log =>
     val uri    = DocumentUri("/home/Test.scala")
@@ -123,7 +143,6 @@ object TextDocumentSyncSuite extends SimpleIOSuite:
       )
 
       doc     <- mgr.get(uri.asNio)
-      content <- doc.getContent
-    yield expect.eql(expected = "val x = 1\np\nval z = 3", found = content)
+    yield expect.eql(expected = "val x = 1\np\nval z = 3", found = doc.content)
 
   }
