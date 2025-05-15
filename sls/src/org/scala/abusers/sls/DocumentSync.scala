@@ -10,7 +10,7 @@ import langoustine.lsp.Invocation
 
 import java.net.URI
 
-case class DocumentState(content: String):
+case class DocumentState(content: String, uri: URI):
   private lazy val locationMap = LocationMap(content)
 
   extension (lspPos: Position)
@@ -21,7 +21,7 @@ case class DocumentState(content: String):
     edits.toList
       .foldLeft(this):
         case (_, incremental: TextDocumentContentChangeEvent.S0) => applyEdit(incremental)
-        case (_, full: TextDocumentContentChangeEvent.S1)        => DocumentState(full.text)
+        case (_, full: TextDocumentContentChangeEvent.S1)        => DocumentState(full.text, uri)
         case _                                                   => sys.error("Illegal State Exception")
 
   private def applyEdit(edit: TextDocumentContentChangeEvent.S0): DocumentState =
@@ -30,7 +30,7 @@ case class DocumentState(content: String):
     val endOffset               = endPos.toOffset
     val init                    = content.take(startOffset)
     val end                     = content.drop(endOffset)
-    DocumentState(init ++ edit.text ++ end)
+    DocumentState(init ++ edit.text ++ end, uri)
 
 object DocumentSyncManager:
   def instance: IO[DocumentSyncManager] =
@@ -65,5 +65,5 @@ class DocumentSyncManager(val documents: MapRef[IO, URI, Option[DocumentState]])
     documents(uri)
       .updateAndGet:
         case Some(existing) => Some(existing)
-        case None           => Some(new DocumentState(content0))
+        case None           => Some(new DocumentState(content0, uri))
       .map(_.get)

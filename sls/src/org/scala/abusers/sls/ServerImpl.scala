@@ -17,7 +17,12 @@ import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.sls.LspNioConverter.asNio
 
+import java.util.concurrent.CompletableFuture
 import scala.concurrent.duration.*
+import scala.jdk.OptionConverters.*
+import scala.jdk.CollectionConverters.*
+import scala.meta.pc.OffsetParams
+import scala.meta.pc.PresentationCompiler
 
 class ServerImpl(
     textDocumentSync: DocumentSyncManager,
@@ -26,34 +31,39 @@ class ServerImpl(
     cancelTokens: IOCancelTokens,
 ):
 
-  // TODO: goto type definition with container types
+  // // TODO: goto type definition with container types
   def handleCompletion(in: Invocation[CompletionParams, IO]) =
-    val uri = in.params.textDocument.uri.asNio
+    offsetParamsRequest(in.params)(_.complete).map: result =>
+        Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
+
+  def handleHover(in: Invocation[HoverParams, IO]) =
+    offsetParamsRequest(in.params)(_.hover).map: result =>
+        Opt.fromOption(result.toScala.map(hoverSig => convert[lsp4j.Hover, lngst.Hover](hoverSig.toLsp())))
+
+  def handleSignatureHelp(in: Invocation[SignatureHelpParams, IO]) =
+    offsetParamsRequest(in.params)(_.signatureHelp).map: result =>
+        Opt(convert[lsp4j.SignatureHelp, lngst.SignatureHelp](result))
+
+  def handleDefinition(in: Invocation[DefinitionParams, IO]) =
+    offsetParamsRequest(in.params)(_.definition).map: result =>
+      Opt.fromOption(result.locations().asScala.headOption.map: definition =>
+        convert[lsp4j.Location, aliases.Definition](definition))
+
+  private def offsetParamsRequest[Params: PositionWithURI, Result](params: Params)(
+      thunk: PresentationCompiler => OffsetParams => CompletableFuture[Result]
+  ): IO[Result] = // TODO Completion on context bound inserts []
+    val uri      = summon[PositionWithURI[Params]].uri(params)
+    val position = summon[PositionWithURI[Params]].position(params)
     cancelTokens.mkCancelToken.use: token =>
         for
           info     <- bspStateManager.get(uri)
-          pc       <- pcProvider.get(info)
           docState <- textDocumentSync.get(uri)
-          params = in.params.toOffsetParams(docState, token)
-          result <- IO.fromCompletableFuture(IO(pc.complete(params)))
-        yield Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
+          offsetParams = toOffsetParams(position, docState, token)
+          pc     <- pcProvider.get(info)
+          result <- IO.fromCompletableFuture(IO(thunk(pc)(offsetParams)))
+        yield result
 
   def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO]) =
-    // for
-    //   _     <- textDocumentSync.didSave(in)
-    //   state <- stateRef.get
-    //   bloop = state.bloopConn.get.client
-    //   targets <- bloop.workspaceBuildTargets()
-    //   targets0 = targets.targets
-    //     // todo: dispatch to all the targets or wait for smithy4s to add mixins even without @adt
-    //     .map(t => t.project.scala.getOrElse(sys.error(s"not a scala target: $t")))
-    //     .map(_.id)
-    //   // ourTarget <- targets.targets.find(in.params.textDocument.uri)
-    //   buildTarget <- inverseSource.get(in.params.textDocument.uri.asNio)
-    //   result <- bloop.buildTargetCompile(buildTarget) // straight to jar here ?? TODO add ID
-    //   _                 <- logMessage(in.toClient, s"${result}")
-    //   generatedByMetals <- logMessage(in.toClient, s"Build target: ${buildTarget}")
-    // yield generatedByMetals
     for
       _    <- textDocumentSync.didSave(in)
       info <- bspStateManager.get(in.params.textDocument.uri.asNio)
@@ -104,6 +114,9 @@ class ServerImpl(
     ServerCapabilities(
       textDocumentSync = Opt(enumerations.TextDocumentSyncKind.Incremental),
       completionProvider = Opt(CompletionOptions(triggerCharacters = Opt(Vector(".")))),
+      hoverProvider = Opt(HoverOptions()),
+      signatureHelpProvider = Opt(SignatureHelpOptions(Opt(Vector("(", "[", "{")), Opt(Vector(",")))),
+      definitionProvider = Opt(DefinitionOptions()),
     )
 
   private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer] =

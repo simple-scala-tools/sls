@@ -73,13 +73,13 @@ extension (scalaVersion: ScalaVersion) def value: String = scalaVersion
 
 object ScalaVersion:
   private val versionRegex = "\\d+(?:[_.-]\\d+)*".r
-  private val separators = Array('.', '-', '_')
+  private val separators   = Array('.', '-', '_')
 
   def apply(scalaVersion: String): ScalaVersion = scalaVersion
   given Ordering[ScalaVersion] = new Ordering[ScalaVersion]:
     def compareParts(x: String, y: String): Int =
       (x.headOption, y.headOption) match
-        case (Some(c1), Some(c2)) if (c1.isDigit && c2.isDigit) =>
+        case (Some(c1), Some(c2)) if c1.isDigit && c2.isDigit =>
           val match1 = versionRegex.findFirstIn(x).get
           val match2 = versionRegex.findFirstIn(y).get
 
@@ -90,13 +90,12 @@ object ScalaVersion:
             case Some((x, y)) => x.toInt compare y.toInt
             case None         => parts1.length compare parts2.length
 
-          if (comparisonResult == 0) compareParts(x.drop(match1.length max 1), y.drop(match2.length max 1))
+          if comparisonResult == 0 then compareParts(x.drop(match1.length max 1), y.drop(match2.length max 1))
           else comparisonResult
         case (Some(c1), Some(c2)) =>
           val comparisonResult = c1 compare c2
-          if (comparisonResult == 0) compareParts(x.tail, y.tail) else comparisonResult
+          if comparisonResult == 0 then compareParts(x.tail, y.tail) else comparisonResult
         case _ => x compare y
 
     override def compare(x: ScalaVersion, y: ScalaVersion): Int =
       compareParts(x.value, y.value)
-
