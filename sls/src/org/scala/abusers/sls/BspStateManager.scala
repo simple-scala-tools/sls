@@ -63,7 +63,7 @@ class BspStateManager(
     for
       workspaceBuildTargets <- bspServer.generic.workspaceBuildTargets()
       scalacOptions         <- bspServer.scala.buildTargetScalacOptions(workspaceBuildTargets.targets.map(_.id)) //
-    yield zip(workspaceBuildTargets, scalacOptions)
+    yield buildTargetToScalaTargets(workspaceBuildTargets, scalacOptions)
       .groupMapReduce(_.buildTarget.id)(identity)(byScalaVersion.max)
       .values
       .toSet
@@ -73,7 +73,7 @@ class BspStateManager(
         .buildTargetInverseSources(bsp.TextDocumentIdentifier(bsp.URI(uri.toString)))
     yield inverseSources.targets
 
-  private def zip(
+  private def buildTargetToScalaTargets(
       targets: bsp.WorkspaceBuildTargetsResult,
       scalacOptions: bsp.scala_.ScalacOptionsResult,
   ): Set[ScalaBuildTargetInformation] =
