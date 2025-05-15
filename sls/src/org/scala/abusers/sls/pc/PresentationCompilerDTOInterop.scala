@@ -23,16 +23,17 @@ object PresentationCompilerDTOInterop:
   // FIXME VVVVV Missing completion for langoustine
   def convert[In, Out: Reader](x: In): Out = read[Out](gson.toJson(x, x.getClass))
 
-  def toOffsetParams(uri0: URI, position: Position, doc: DocumentState, cancelToken: CancelToken): OffsetParams =
+  def toOffsetParams(position: Position, doc: DocumentState, cancelToken: CancelToken): OffsetParams =
+    import doc.*
     new OffsetParams:
       override def toString(): String =
         s"""offset: $offset
            |$uri
            |$text""".stripMargin
-      def offset(): Int        = doc.lineToOffset(position.line.value) + position.character.value
+      def offset(): Int        = position.toOffset
       def text(): String       = doc.content
       def token(): CancelToken = cancelToken
-      def uri(): URI           = uri0
+      def uri(): URI           = doc.uri
 
   trait PositionWithURI[A]:
     def position(params: A): Position

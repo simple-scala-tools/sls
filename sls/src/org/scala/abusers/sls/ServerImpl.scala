@@ -58,7 +58,7 @@ class ServerImpl(
         for
           info     <- bspStateManager.get(uri)
           docState <- textDocumentSync.get(uri)
-          offsetParams = toOffsetParams(uri, position, docState, token)
+          offsetParams = toOffsetParams(position, docState, token)
           pc     <- pcProvider.get(info)
           result <- IO.fromCompletableFuture(IO(thunk(pc)(offsetParams)))
         yield result
@@ -125,15 +125,28 @@ class ServerImpl(
     val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
       .spawn[IO]
       .flatMap { bspSocketProc =>
-        bspSocketProc.stdout
-          .merge(bspSocketProc.stderr)
-          .through(text.utf8.decode)
-          .through(text.lines)
-          .evalMap(s => logMessage(back, s"[bloop] $s"))
-          .onFinalizeCase(c => sendMessage(back, s"Bloop process terminated $c"))
-          .compile
-          .drain
-          .background
+        IO.deferred[Unit].toResource.flatMap { started =>
+          val waitForStart: fs2.Pipe[IO, Byte, Nothing] =
+            _.through(fs2.text.utf8.decode)
+              .through(fs2.text.lines)
+              .find(_.contains("The server is listening for incoming connections"))
+              .foreach(_ => started.complete(()).void)
+              .drain
+
+          bspSocketProc.stdout
+            .observe(waitForStart)
+            .merge(bspSocketProc.stderr)
+            .through(text.utf8.decode)
+            .through(text.lines)
+            .evalMap(s => logMessage(back, s"[bloop] $s"))
+            .onFinalizeCase(c => sendMessage(back, s"Bloop process terminated $c"))
+            .compile
+            .drain
+            .background
+          // wait for the started message before proceeding
+            <* started.get.toResource
+        }
+
       }
       .as(socketFile)
 
