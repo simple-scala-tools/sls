@@ -1,8 +1,12 @@
 package org.scala.abusers.pc
 
-import langoustine.lsp.structures.CompletionParams
+import langoustine.lsp.runtime.DocumentUri
+import langoustine.lsp.structures.*
+import langoustine.lsp.structures.HoverParams
+import langoustine.lsp.structures.Position
 import org.eclipse.lsp4j.jsonrpc.json.MessageJsonHandler
 import org.scala.abusers.sls.DocumentState
+import org.scala.abusers.sls.LspNioConverter.asNio
 import upickle.default.*
 
 import java.net.URI
@@ -19,14 +23,33 @@ object PresentationCompilerDTOInterop:
   // FIXME VVVVV Missing completion for langoustine
   def convert[In, Out: Reader](x: In): Out = read[Out](gson.toJson(x, x.getClass))
 
-  extension (x: CompletionParams)
-    def toOffsetParams(doc: DocumentState, cancelToken: CancelToken): OffsetParams =
-      new OffsetParams:
-        override def toString(): String =
-          s"""offset: $offset
-             |$uri
-             |$text""".stripMargin
-        def offset(): Int        = doc.lineToOffset(x.position.line.value) + x.position.character.value
-        def text(): String       = doc.content
-        def token(): CancelToken = cancelToken
-        def uri(): URI           = URI.create(x.textDocument.uri.value)
+  def toOffsetParams(uri0: URI, position: Position, doc: DocumentState, cancelToken: CancelToken): OffsetParams =
+    new OffsetParams:
+      override def toString(): String =
+        s"""offset: $offset
+           |$uri
+           |$text""".stripMargin
+      def offset(): Int        = doc.lineToOffset(position.line.value) + position.character.value
+      def text(): String       = doc.content
+      def token(): CancelToken = cancelToken
+      def uri(): URI           = uri0
+
+  trait PositionWithURI[A]:
+    def position(params: A): Position
+    def uri(params: A): URI
+
+  given PositionWithURI[CompletionParams] with
+    def position(params: CompletionParams): Position = params.position
+    def uri(params: CompletionParams): URI           = params.textDocument.uri.asNio
+
+  given PositionWithURI[HoverParams] with // TODO can't rename inside the type param
+    def position(params: HoverParams): Position = params.position
+    def uri(params: HoverParams): URI           = params.textDocument.uri.asNio
+
+  given PositionWithURI[SignatureHelpParams] with
+    def position(params: SignatureHelpParams): Position = params.position
+    def uri(params: SignatureHelpParams): URI           = params.textDocument.uri.asNio
+
+  given PositionWithURI[DefinitionParams] with
+    def position(params: DefinitionParams): Position = params.position
+    def uri(params: DefinitionParams): URI           = params.textDocument.uri.asNio

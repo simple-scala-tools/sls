@@ -53,3 +53,6 @@ object SimpleScalaServer extends LangoustineApp:
       .handleNotification(textDocument.didChange)(impl.handleDidChange)
       .handleNotification(textDocument.didSave)(impl.handleDidSave)
       .handleRequest(textDocument.completion)(impl.handleCompletion)
+      .handleRequest(textDocument.hover)(impl.handleHover)
+      .handleRequest(textDocument.signatureHelp)(impl.handleSignatureHelp)
+      .handleRequest(textDocument.definition)(impl.handleDefinition)
