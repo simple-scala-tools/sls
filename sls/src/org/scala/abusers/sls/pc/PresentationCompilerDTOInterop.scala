@@ -21,12 +21,13 @@ object PresentationCompilerDTOInterop:
 
   extension (x: CompletionParams)
     def toOffsetParams(doc: DocumentState, cancelToken: CancelToken): OffsetParams =
+      import doc.*
       new OffsetParams:
         override def toString(): String =
           s"""offset: $offset
              |$uri
              |$text""".stripMargin
-        def offset(): Int        = doc.lineToOffset(x.position.line.value) + x.position.character.value
+        def offset(): Int        = x.position.toOffset
         def text(): String       = doc.content
         def token(): CancelToken = cancelToken
         def uri(): URI           = URI.create(x.textDocument.uri.value)

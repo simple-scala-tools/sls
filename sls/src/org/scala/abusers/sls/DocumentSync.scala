@@ -2,45 +2,20 @@ package org.scala.abusers.sls // TODO package completions are still here when th
 
 import cats.effect.*
 import cats.effect.std.MapRef
+import cats.parse.LocationMap
 import cats.syntax.all.*
 import langoustine.lsp.aliases.TextDocumentContentChangeEvent
 import langoustine.lsp.structures.*
 import langoustine.lsp.Invocation
 
 import java.net.URI
-import scala.annotation.switch
-import scala.collection.mutable.ArrayBuffer
-
-object Chars:
-  inline val LF = '\u000A'
-  inline val FF = '\u000C'
-  inline val CR = '\u000D'
-  inline val SU = '\u001A'
-
-  /** Is character a line break? */
-  def isLineBreakChar(c: Char): Boolean = (c: @switch) match
-    case LF | FF | CR | SU => true
-    case _                 => false
 
 case class DocumentState(content: String):
-  // We could have implemented incremental linesCache updating based on textEdits, but I believe this will not cause any performance bottlenecks.
-  private lazy val linesCache =
-    val buf = new ArrayBuffer[Int]
-    buf += 0
-    var i = 0
-    while i < content.length do
-      val isLineBreak =
-        val ch = content(i)
-        // don't identify the CR in CR LF as a line break, since LF will do.
-        if ch == Chars.CR then i + 1 == content.length || content(i + 1) != Chars.LF
-        else Chars.isLineBreakChar(ch)
-      if isLineBreak then buf += i + 1
-      i += 1
-    buf += content.length // sentinel, so that findLine below works smoother
-    buf.toArray
+  private lazy val locationMap = LocationMap(content)
 
-  /** Map line to offset of first character in line */
-  def lineToOffset(index: Int): Int = linesCache(index)
+  extension (lspPos: Position)
+    def toOffset: Int =
+      locationMap.toOffset(lspPos.line.value, lspPos.character.value).getOrElse(-1 /* no such line */ )
 
   def processEdits(edits: Vector[TextDocumentContentChangeEvent]): DocumentState =
     edits.toList
@@ -51,8 +26,8 @@ case class DocumentState(content: String):
 
   private def applyEdit(edit: TextDocumentContentChangeEvent.S0): DocumentState =
     val Range(startPos, endPos) = edit.range
-    val startOffset             = lineToOffset(startPos.line.value) + startPos.character.value
-    val endOffset               = lineToOffset(endPos.line.value) + endPos.character.value
+    val startOffset             = startPos.toOffset
+    val endOffset               = endPos.toOffset
     val init                    = content.take(startOffset)
     val end                     = content.drop(endOffset)
     DocumentState(init ++ edit.text ++ end)
