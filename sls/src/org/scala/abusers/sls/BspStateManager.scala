@@ -2,7 +2,6 @@ package org.scala.abusers.sls
 
 import bsp.scala_.ScalacOptionsItem
 import bsp.BuildTarget.BuildTargetScalaBuildTarget
-import cats.effect.kernel.Deferred
 import cats.effect.kernel.Ref
 import cats.effect.std.MapRef
 import cats.effect.IO
@@ -29,7 +28,7 @@ object ScalaBuildTargetInformation:
 
 object BspStateManager:
 
-  def instance(bspServer: Deferred[IO, BuildServer]): IO[BspStateManager] =
+  def instance(bspServer: BuildServer): IO[BspStateManager] =
     // We should track this in progress bar. Think of this as `Import Build`
     for
       sourcesToTargets <- MapRef.ofScalaConcurrentTrieMap[IO, URI, ScalaBuildTargetInformation]
@@ -43,7 +42,7 @@ object BspStateManager:
   * feature Another option will be to default to latest version which after all I'll default to right now
   */
 class BspStateManager(
-    val bspServer: Deferred[IO, BuildServer],
+    val bspServer: BuildServer,
     sourcesToTargets: MapRef[IO, URI, Option[ScalaBuildTargetInformation]],
     targets: Ref[IO, Set[ScalaBuildTargetInformation]],
 ):
@@ -51,9 +50,8 @@ class BspStateManager(
 
   def importBuild =
     for
-      bspServer0    <- bspServer.get
-      importedBuild <- getBuildInformation(bspServer0)
-      _             <- bspServer0.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
+      importedBuild <- getBuildInformation(bspServer)
+      _             <- bspServer.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
       _             <- targets.set(importedBuild)
     yield ()
 
@@ -67,12 +65,11 @@ class BspStateManager(
       scalacOptions         <- bspServer.scala.buildTargetScalacOptions(workspaceBuildTargets.targets.map(_.id)) //
     yield zip(workspaceBuildTargets, scalacOptions)
       .groupMapReduce(_.buildTarget.id)(identity)(byScalaVersion.max)
-      .values.toSet
+      .values
+      .toSet
 
   def buildTargetInverseSources(uri: URI): IO[List[bsp.BuildTargetIdentifier]] =
-    for
-      bspServer0 <- bspServer.get
-      inverseSources <- bspServer0.generic
+    for inverseSources <- bspServer.generic
         .buildTargetInverseSources(bsp.TextDocumentIdentifier(bsp.URI(uri.toString)))
     yield inverseSources.targets
 

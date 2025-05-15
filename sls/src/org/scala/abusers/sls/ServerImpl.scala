@@ -55,10 +55,11 @@ class ServerImpl(
     //   generatedByMetals <- logMessage(in.toClient, s"Build target: ${buildTarget}")
     // yield generatedByMetals
     for
-      _          <- textDocumentSync.didSave(in)
-      info       <- bspStateManager.get(in.params.textDocument.uri.asNio)
-      bspServer0 <- bspStateManager.bspServer.get
-      _ <- bspServer0.generic.buildTargetCompile(List(info.buildTarget.id)) // straight to jar here ?? TODO add ID
+      _    <- textDocumentSync.didSave(in)
+      info <- bspStateManager.get(in.params.textDocument.uri.asNio)
+      _ <- bspStateManager.bspServer.generic.buildTargetCompile(
+        List(info.buildTarget.id)
+      ) // straight to jar here ?? TODO add ID
     yield ()
 
   def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO]) =

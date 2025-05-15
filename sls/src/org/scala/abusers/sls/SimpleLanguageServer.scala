@@ -15,6 +15,14 @@ case class BuildServer(
     java: bsp.java_.JavaBuildServer[IO],
 )
 
+object BuildServer:
+  def suspend(client: IO[BuildServer]): BuildServer = BuildServer(
+    SmithySuspend.sus(client.map(_.generic)),
+    SmithySuspend.sus(client.map(_.jvm)),
+    SmithySuspend.sus(client.map(_.scala)),
+    SmithySuspend.sus(client.map(_.java)),
+  )
+
 case class State(files: Set[String], bspClient: Deferred[IO, BuildServer])
 // def withBspClient(bspClient: BuildServer) = copy(bspClient = (bspClient))
 
@@ -34,7 +42,7 @@ object SimpleScalaServer extends LangoustineApp:
       textDocumentSync  <- DocumentSyncManager.instance.toResource
       pcProvider        <- PresentationCompilerProvider.instance.toResource
       bspClientDeferred <- Deferred[IO, BuildServer].toResource
-      bspStateManager   <- BspStateManager.instance(bspClientDeferred).toResource
+      bspStateManager   <- BspStateManager.instance(BuildServer.suspend(bspClientDeferred.get)).toResource
       cancelTokens      <- IOCancelTokens.instance
       impl = ServerImpl(textDocumentSync, pcProvider, bspStateManager, cancelTokens)
     yield LSPBuilder
