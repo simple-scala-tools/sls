@@ -19,8 +19,8 @@ import org.scala.abusers.sls.LspNioConverter.asNio
 
 import java.util.concurrent.CompletableFuture
 import scala.concurrent.duration.*
-import scala.jdk.OptionConverters.*
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompiler
 
@@ -46,8 +46,14 @@ class ServerImpl(
 
   def handleDefinition(in: Invocation[DefinitionParams, IO]) =
     offsetParamsRequest(in.params)(_.definition).map: result =>
-      Opt.fromOption(result.locations().asScala.headOption.map: definition =>
-        convert[lsp4j.Location, aliases.Definition](definition))
+        Opt.fromOption(
+          result
+            .locations()
+            .asScala
+            .headOption
+            .map: definition =>
+              convert[lsp4j.Location, aliases.Definition](definition)
+        )
 
   private def offsetParamsRequest[Params: PositionWithURI, Result](params: Params)(
       thunk: PresentationCompiler => OffsetParams => CompletableFuture[Result]
@@ -153,9 +159,9 @@ class ServerImpl(
     val bspClientRes = for
       socketPath <- bspProcess
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
-      channel    <- FS2Channel.resource[IO]()
-      // TODO: bsp4s is currently broken (diagnostics result sent from server can't be parsed). When it's fixed, restore this
-      // .flatMap(_.withEndpoints(bspClientHandler(back)))
+      channel <- FS2Channel
+        .resource[IO]()
+        .flatMap(_.withEndpoints(bspClientHandler(back)))
       client <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
     yield client
 
