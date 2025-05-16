@@ -1,5 +1,7 @@
 package org.scala.abusers.sls
 
+import bsp.CompileParams
+import bsp.InitializeBuildParams
 import cats.effect.kernel.Deferred
 import cats.effect.kernel.Resource
 import cats.effect.IO
@@ -74,7 +76,9 @@ class ServerImpl(
       _    <- textDocumentSync.didSave(in)
       info <- bspStateManager.get(in.params.textDocument.uri.asNio)
       _ <- bspStateManager.bspServer.generic.buildTargetCompile(
-        List(info.buildTarget.id)
+        CompileParams(
+          targets = List(info.buildTarget.id)
+        )
       ) // straight to jar here ?? TODO add ID
     yield ()
 
@@ -101,11 +105,13 @@ class ServerImpl(
       bspClient <- connectWithBloop(in.toClient, steward)
       _         <- logMessage(in.toClient, "Connection with bloop estabilished")
       response <- bspClient.generic.buildInitialize(
-        displayName = "bloop",
-        version = "0.0.0",
-        bspVersion = "2.1.0",
-        rootUri = bsp.URI(rootUri.value),
-        capabilities = bsp.BuildClientCapabilities(languageIds = List(bsp.LanguageId("scala"))),
+        InitializeBuildParams(
+          displayName = "bloop",
+          version = "0.0.0",
+          bspVersion = "2.1.0",
+          rootUri = bsp.URI(rootUri.value),
+          capabilities = bsp.BuildClientCapabilities(languageIds = List(bsp.LanguageId("scala"))),
+        )
       )
       _ <- logMessage(in.toClient, s"Response from bsp: $response")
       _ <- bspClient.generic.onBuildInitialized()

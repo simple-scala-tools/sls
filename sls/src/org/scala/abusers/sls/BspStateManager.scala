@@ -1,7 +1,10 @@
 package org.scala.abusers.sls
 
 import bsp.scala_.ScalacOptionsItem
+import bsp.scala_.ScalacOptionsParams
 import bsp.BuildTarget.BuildTargetScalaBuildTarget
+import bsp.CompileParams
+import bsp.InverseSourcesParams
 import cats.effect.kernel.Ref
 import cats.effect.std.MapRef
 import cats.effect.IO
@@ -17,9 +20,7 @@ type ScalaBuildTargetInformation = (scalacOptions: ScalacOptionsItem, buildTarge
 object ScalaBuildTargetInformation:
   extension (buildTargetInformation: ScalaBuildTargetInformation)
     def scalaVersion: ScalaVersion =
-      buildTargetInformation.buildTarget.data
-        .map(data => ScalaVersion(data.scalaVersion))
-        .getOrElse(throw new IllegalStateException("All of our targets should have Scala version for now")) // FIXME
+      ScalaVersion(buildTargetInformation.buildTarget.data.scalaVersion)
 
     def classpath: List[os.Path] =
       buildTargetInformation.scalacOptions.classpath.map(entry => os.Path(URI.create(entry)))
@@ -51,8 +52,8 @@ class BspStateManager(
   def importBuild =
     for
       importedBuild <- getBuildInformation(bspServer)
-      _             <- bspServer.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
-      _             <- targets.set(importedBuild)
+      _ <- bspServer.generic.buildTargetCompile(CompileParams(targets = importedBuild.map(_.buildTarget.id).toList))
+      _ <- targets.set(importedBuild)
     yield ()
 
   val byScalaVersion: Ordering[ScalaBuildTargetInformation] = new Ordering[ScalaBuildTargetInformation]:
@@ -62,7 +63,9 @@ class BspStateManager(
   def getBuildInformation(bspServer: BuildServer): IO[Set[ScalaBuildTargetInformation]] =
     for
       workspaceBuildTargets <- bspServer.generic.workspaceBuildTargets()
-      scalacOptions         <- bspServer.scala.buildTargetScalacOptions(workspaceBuildTargets.targets.map(_.id)) //
+      scalacOptions <- bspServer.scala.buildTargetScalacOptions(
+        ScalacOptionsParams(targets = workspaceBuildTargets.targets.map(_.id))
+      ) //
     yield buildTargetToScalaTargets(workspaceBuildTargets, scalacOptions)
       .groupMapReduce(_.buildTarget.id)(identity)(byScalaVersion.max)
       .values
@@ -70,7 +73,11 @@ class BspStateManager(
 
   def buildTargetInverseSources(uri: URI): IO[List[bsp.BuildTargetIdentifier]] =
     for inverseSources <- bspServer.generic
-        .buildTargetInverseSources(bsp.TextDocumentIdentifier(bsp.URI(uri.toString)))
+        .buildTargetInverseSources(
+          InverseSourcesParams(
+            textDocument = bsp.TextDocumentIdentifier(bsp.URI(uri.toString))
+          )
+        )
     yield inverseSources.targets
 
   private def buildTargetToScalaTargets(
@@ -105,7 +112,7 @@ class BspStateManager(
       possibleIds <- buildTargetInverseSources(uri)
       targets0    <- targets.get
       possibleBuildTargets = possibleIds.flatMap(id => targets0.find(_.buildTarget.id == id))
-      bestBuildTarget      = possibleBuildTargets.maxBy(_.buildTarget.project.scala.flatMap(_.data.map(_.scalaVersion)))
+      bestBuildTarget      = possibleBuildTargets.maxBy(_.buildTarget.project.scala.map(_.data.scalaVersion))
       _ <- sourcesToTargets(uri).set(Some(bestBuildTarget)) // lets assume we will always update it
     yield ()
 

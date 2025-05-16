@@ -1,6 +1,5 @@
 package org.scala.abusers.pc
 
-import langoustine.lsp.runtime.DocumentUri
 import langoustine.lsp.structures.*
 import langoustine.lsp.structures.HoverParams
 import langoustine.lsp.structures.Position
