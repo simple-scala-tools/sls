@@ -19,8 +19,9 @@ import org.scala.abusers.sls.LspNioConverter.asNio
 
 import java.util.concurrent.CompletableFuture
 import scala.concurrent.duration.*
-import scala.jdk.OptionConverters.*
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
+import scala.meta.pc.InlayHintsParams
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompiler
 
@@ -46,22 +47,59 @@ class ServerImpl(
 
   def handleDefinition(in: Invocation[DefinitionParams, IO]) =
     offsetParamsRequest(in.params)(_.definition).map: result =>
-      Opt.fromOption(result.locations().asScala.headOption.map: definition =>
-        convert[lsp4j.Location, aliases.Definition](definition))
+        Opt.fromOption(
+          result
+            .locations()
+            .asScala
+            .headOption
+            .map: definition =>
+              convert[lsp4j.Location, aliases.Definition](definition)
+        )
+
+  def handleInlayHints(in: Invocation[InlayHintParams, IO]) =
+    val uri0 = summon[WithURI[InlayHintParams]].uri(in.params)
+
+    cancelTokens.mkCancelToken.use: token0 =>
+        for
+          docState <- textDocumentSync.get(uri0)
+          inalyHintsParams = new InlayHintsParams:
+            import docState.*
+            def implicitConversions(): Boolean     = true
+            def implicitParameters(): Boolean      = true
+            def inferredTypes(): Boolean           = true
+            def typeParameters(): Boolean          = true
+            def offset(): Int                      = in.params.range.start.toOffset
+            def endOffset(): Int                   = in.params.range.end.toOffset
+            def text(): String                     = content
+            def token(): scala.meta.pc.CancelToken = token0
+            def uri(): java.net.URI                = uri0
+
+          result <- pcParamsRequest(in.params, inalyHintsParams)(_.inlayHints)
+        yield Opt(convert[java.util.List[lsp4j.InlayHint], Vector[InlayHint]](result))
+
+  // def handleInlayHintsRefresh(in: Invocation[Unit, IO]) = IO.pure(null)
 
   private def offsetParamsRequest[Params: PositionWithURI, Result](params: Params)(
       thunk: PresentationCompiler => OffsetParams => CompletableFuture[Result]
   ): IO[Result] = // TODO Completion on context bound inserts []
-    val uri      = summon[PositionWithURI[Params]].uri(params)
-    val position = summon[PositionWithURI[Params]].position(params)
+    val uri      = summon[WithURI[Params]].uri(params)
+    val position = summon[WithPosition[Params]].position(params)
     cancelTokens.mkCancelToken.use: token =>
         for
-          info     <- bspStateManager.get(uri)
           docState <- textDocumentSync.get(uri)
           offsetParams = toOffsetParams(position, docState, token)
-          pc     <- pcProvider.get(info)
-          result <- IO.fromCompletableFuture(IO(thunk(pc)(offsetParams)))
+          result <- pcParamsRequest(params, offsetParams)(thunk)
         yield result
+
+  private def pcParamsRequest[Params: WithURI, Result, PcParams](params: Params, pcParams: PcParams)(
+      thunk: PresentationCompiler => PcParams => CompletableFuture[Result]
+  ): IO[Result] = // TODO Completion on context bound inserts []
+    val uri = summon[WithURI[Params]].uri(params)
+    for
+      info   <- bspStateManager.get(uri)
+      pc     <- pcProvider.get(info)
+      result <- IO.fromCompletableFuture(IO(thunk(pc)(pcParams)))
+    yield result
 
   def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO]) =
     for
@@ -82,7 +120,8 @@ class ServerImpl(
     textDocumentSync.didClose(in)
 
   def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]) =
-    textDocumentSync.didChange(in)
+    for _ <- textDocumentSync.didChange(in)
+    yield ()
 
   def handleInitialize(steward: ResourceSupervisor[IO], bspClientDeferred: Deferred[IO, BuildServer])(
       in: Invocation[InitializeParams, IO]
@@ -117,6 +156,7 @@ class ServerImpl(
       hoverProvider = Opt(HoverOptions()),
       signatureHelpProvider = Opt(SignatureHelpOptions(Opt(Vector("(", "[", "{")), Opt(Vector(",")))),
       definitionProvider = Opt(DefinitionOptions()),
+      inlayHintProvider = Opt(InlayHintOptions(resolveProvider = Opt(false))),
     )
 
   private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer] =

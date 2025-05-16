@@ -56,3 +56,5 @@ object SimpleScalaServer extends LangoustineApp:
       .handleRequest(textDocument.hover)(impl.handleHover)
       .handleRequest(textDocument.signatureHelp)(impl.handleSignatureHelp)
       .handleRequest(textDocument.definition)(impl.handleDefinition)
+      .handleRequest(textDocument.inlayHint)(impl.handleInlayHints)
+    // .handleRequest(textDocument.inlayHint.resolve)(impl.handleInlayHintsResolve)
