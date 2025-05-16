@@ -34,9 +34,17 @@ object PresentationCompilerDTOInterop:
       def token(): CancelToken = cancelToken
       def uri(): URI           = doc.uri
 
-  trait PositionWithURI[A]:
+  trait WithPosition[A]:
     def position(params: A): Position
+
+  trait WithRange[A]:
+    def range(params: A): Range
+
+  trait WithURI[A]:
     def uri(params: A): URI
+
+  trait PositionWithURI[A] extends WithPosition[A] with WithURI[A]
+  trait RangeWithURI[A]    extends WithRange[A] with WithURI[A]
 
   given PositionWithURI[CompletionParams] with
     def position(params: CompletionParams): Position = params.position
@@ -53,3 +61,7 @@ object PresentationCompilerDTOInterop:
   given PositionWithURI[DefinitionParams] with
     def position(params: DefinitionParams): Position = params.position
     def uri(params: DefinitionParams): URI           = params.textDocument.uri.asNio
+
+  given RangeWithURI[InlayHintParams] with
+    def range(params: InlayHintParams): Range = params.range
+    def uri(params: InlayHintParams): URI     = params.textDocument.uri.asNio
