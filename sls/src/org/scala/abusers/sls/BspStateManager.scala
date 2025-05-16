@@ -17,8 +17,8 @@ import java.net.URI
 
 type ScalaBuildTargetInformation = (scalacOptions: ScalacOptionsItem, buildTarget: BuildTargetScalaBuildTarget)
 
-object ScalaBuildTargetInformation:
-  extension (buildTargetInformation: ScalaBuildTargetInformation)
+object ScalaBuildTargetInformation {
+  extension (buildTargetInformation: ScalaBuildTargetInformation) {
     def scalaVersion: ScalaVersion =
       ScalaVersion(buildTargetInformation.buildTarget.data.scalaVersion)
 
@@ -26,15 +26,18 @@ object ScalaBuildTargetInformation:
       buildTargetInformation.scalacOptions.classpath.map(entry => os.Path(URI.create(entry)))
 
     def compilerOptions: List[String] = buildTargetInformation.scalacOptions.options
+  }
+}
 
-object BspStateManager:
+object BspStateManager {
 
   def instance(bspServer: BuildServer): IO[BspStateManager] =
     // We should track this in progress bar. Think of this as `Import Build`
-    for
+    for {
       sourcesToTargets <- MapRef.ofScalaConcurrentTrieMap[IO, URI, ScalaBuildTargetInformation]
       buildTargets     <- Ref.of[IO, Set[ScalaBuildTargetInformation]](Set.empty)
-    yield BspStateManager(bspServer, sourcesToTargets, buildTargets)
+    } yield BspStateManager(bspServer, sourcesToTargets, buildTargets)
+}
 
 /** Class responsible for tracking and handling map between file and target we want to compile it against
   *
@@ -46,56 +49,59 @@ class BspStateManager(
     val bspServer: BuildServer,
     sourcesToTargets: MapRef[IO, URI, Option[ScalaBuildTargetInformation]],
     targets: Ref[IO, Set[ScalaBuildTargetInformation]],
-):
+) {
   import ScalaBuildTargetInformation.*
 
   def importBuild =
-    for
+    for {
       importedBuild <- getBuildInformation(bspServer)
       _ <- bspServer.generic.buildTargetCompile(CompileParams(targets = importedBuild.map(_.buildTarget.id).toList))
       _ <- targets.set(importedBuild)
-    yield ()
+    } yield ()
 
-  val byScalaVersion: Ordering[ScalaBuildTargetInformation] = new Ordering[ScalaBuildTargetInformation]:
+  val byScalaVersion: Ordering[ScalaBuildTargetInformation] = new Ordering[ScalaBuildTargetInformation] {
     override def compare(x: ScalaBuildTargetInformation, y: ScalaBuildTargetInformation): Int =
       Ordering[ScalaVersion].compare(x.scalaVersion, y.scalaVersion)
+  }
 
   def getBuildInformation(bspServer: BuildServer): IO[Set[ScalaBuildTargetInformation]] =
-    for
+    for {
       workspaceBuildTargets <- bspServer.generic.workspaceBuildTargets()
       scalacOptions <- bspServer.scala.buildTargetScalacOptions(
         ScalacOptionsParams(targets = workspaceBuildTargets.targets.map(_.id))
       ) //
-    yield buildTargetToScalaTargets(workspaceBuildTargets, scalacOptions)
+    } yield buildTargetToScalaTargets(workspaceBuildTargets, scalacOptions)
       .groupMapReduce(_.buildTarget.id)(identity)(byScalaVersion.max)
       .values
       .toSet
 
   def buildTargetInverseSources(uri: URI): IO[List[bsp.BuildTargetIdentifier]] =
     for inverseSources <- bspServer.generic
-        .buildTargetInverseSources(
-          InverseSourcesParams(
-            textDocument = bsp.TextDocumentIdentifier(bsp.URI(uri.toString))
-          )
+      .buildTargetInverseSources(
+        InverseSourcesParams(
+          textDocument = bsp.TextDocumentIdentifier(bsp.URI(uri.toString))
         )
+      )
     yield inverseSources.targets
 
   private def buildTargetToScalaTargets(
       targets: bsp.WorkspaceBuildTargetsResult,
       scalacOptions: bsp.scala_.ScalacOptionsResult,
-  ): Set[ScalaBuildTargetInformation] =
+  ): Set[ScalaBuildTargetInformation] = {
     val scalacOptions0 = scalacOptions.items.map(item => item.target -> item).toMap
-    val (mismatchedTargets, zippedTargets) = targets.targets.partitionMap: target =>
-        scalacOptions0.get(target.id) match
-          case Some(scalacOptionsItem) if target.project.scala.isDefined =>
-            Right(scalacOptions = scalacOptionsItem, buildTarget = target.project.scala.get)
-          case _ => Left(target.id)
+    val (mismatchedTargets, zippedTargets) = targets.targets.partitionMap { target =>
+      scalacOptions0.get(target.id) match {
+        case Some(scalacOptionsItem) if target.project.scala.isDefined =>
+          Right(scalacOptions = scalacOptionsItem, buildTarget = target.project.scala.get)
+        case _ => Left(target.id)
+      }
+    }
 
-    if mismatchedTargets.nonEmpty then
-      throw new IllegalStateException(
-        s"Mismatched targets to ScalacOptionsResult probably caused due to existance of java scopes. ${mismatchedTargets.mkString(", ")}"
-      )
+    if mismatchedTargets.nonEmpty then throw new IllegalStateException(
+      s"Mismatched targets to ScalacOptionsResult probably caused due to existance of java scopes. ${mismatchedTargets.mkString(", ")}"
+    )
     else zippedTargets.toSet
+  }
 
   /** didOpen / didChange is always a first request in sequence e.g didChange -> completion -> semanticTokens
     *
@@ -106,24 +112,26 @@ class BspStateManager(
       _.getOrElse(throw new IllegalStateException("Get should always be called after didOpen"))
     )
 
-  def didOpen(in: Invocation[DidOpenTextDocumentParams, IO]): IO[Unit] =
+  def didOpen(in: Invocation[DidOpenTextDocumentParams, IO]): IO[Unit] = {
     val uri = in.params.textDocument.uri.asNio
-    for
+    for {
       possibleIds <- buildTargetInverseSources(uri)
       targets0    <- targets.get
       possibleBuildTargets = possibleIds.flatMap(id => targets0.find(_.buildTarget.id == id))
       bestBuildTarget      = possibleBuildTargets.maxBy(_.buildTarget.project.scala.map(_.data.scalaVersion))
       _ <- sourcesToTargets(uri).set(Some(bestBuildTarget)) // lets assume we will always update it
-    yield ()
+    } yield ()
+  }
+}
 
-  // to be used in the future
-  // def didChangeConfiguration =
-  //   for
-  //     bspServer0       <- bspServer.get
-  //     importedBuild <- getBuildInformation(bspServer0)
-  //     _             <- bspServer0.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
-  //     _                <- targets.set(importedBuild)
-  //   yield ()
+// to be used in the future
+// def didChangeConfiguration =
+//   for
+//     bspServer0       <- bspServer.get
+//     importedBuild <- getBuildInformation(bspServer0)
+//     _             <- bspServer0.generic.buildTargetCompile(importedBuild.map(_.buildTarget.id).toList)
+//     _                <- targets.set(importedBuild)
+//   yield ()
 
-  // didRename
-  // didRemove
+// didRename
+// didRemove

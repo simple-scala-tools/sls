@@ -17,6 +17,7 @@ trait CommonScalaModule extends ScalaModule with ScalafixModule {
   }
 
   def scalaVersion = "3.7.0"
+  def scalacOptions = Seq("-no-indent", "-Wunused:all")
 }
 
 object sls extends CommonScalaModule {
@@ -36,10 +37,6 @@ object sls extends CommonScalaModule {
     ivy"io.get-coursier:coursier_2.13:2.1.24"
       .excludeOrg("org.scala-lang"),
   ).map(_.exclude("com.github.plokhotnyuk.jsoniter-scala" -> "jsoniter-scala-core_3"))
-
-  def scalacOptions = Seq(
-    "-Wunused:all"
-  )
 
   object test extends ScalaTests {
     def ivyDeps = Agg(

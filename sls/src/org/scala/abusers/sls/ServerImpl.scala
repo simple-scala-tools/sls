@@ -32,79 +32,88 @@ class ServerImpl(
     pcProvider: PresentationCompilerProvider,
     bspStateManager: BspStateManager,
     cancelTokens: IOCancelTokens,
-):
+) {
 
   // // TODO: goto type definition with container types
   def handleCompletion(in: Invocation[CompletionParams, IO]) =
-    offsetParamsRequest(in.params)(_.complete).map: result =>
-        Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
+    offsetParamsRequest(in.params)(_.complete).map { result =>
+      Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
+    }
 
   def handleHover(in: Invocation[HoverParams, IO]) =
-    offsetParamsRequest(in.params)(_.hover).map: result =>
-        Opt.fromOption(result.toScala.map(hoverSig => convert[lsp4j.Hover, lngst.Hover](hoverSig.toLsp())))
+    offsetParamsRequest(in.params)(_.hover).map { result =>
+      Opt.fromOption(result.toScala.map(hoverSig => convert[lsp4j.Hover, lngst.Hover](hoverSig.toLsp())))
+    }
 
   def handleSignatureHelp(in: Invocation[SignatureHelpParams, IO]) =
-    offsetParamsRequest(in.params)(_.signatureHelp).map: result =>
-        Opt(convert[lsp4j.SignatureHelp, lngst.SignatureHelp](result))
+    offsetParamsRequest(in.params)(_.signatureHelp).map { result =>
+      Opt(convert[lsp4j.SignatureHelp, lngst.SignatureHelp](result))
+    }
 
   def handleDefinition(in: Invocation[DefinitionParams, IO]) =
-    offsetParamsRequest(in.params)(_.definition).map: result =>
-        Opt.fromOption(
-          result
-            .locations()
-            .asScala
-            .headOption
-            .map: definition =>
-              convert[lsp4j.Location, aliases.Definition](definition)
-        )
+    offsetParamsRequest(in.params)(_.definition).map { result =>
+      Opt.fromOption(
+        result
+          .locations()
+          .asScala
+          .headOption
+          .map(definition => convert[lsp4j.Location, aliases.Definition](definition))
+      )
+    }
 
-  def handleInlayHints(in: Invocation[InlayHintParams, IO]) =
+  def handleInlayHints(in: Invocation[InlayHintParams, IO]) = {
     val uri0 = summon[WithURI[InlayHintParams]].uri(in.params)
 
-    cancelTokens.mkCancelToken.use: token0 =>
-        for
-          docState <- textDocumentSync.get(uri0)
-          inalyHintsParams = new InlayHintsParams:
-            import docState.*
-            def implicitConversions(): Boolean     = true
-            def implicitParameters(): Boolean      = true
-            def inferredTypes(): Boolean           = true
-            def typeParameters(): Boolean          = true
-            def offset(): Int                      = in.params.range.start.toOffset
-            def endOffset(): Int                   = in.params.range.end.toOffset
-            def text(): String                     = content
-            def token(): scala.meta.pc.CancelToken = token0
-            def uri(): java.net.URI                = uri0
+    cancelTokens.mkCancelToken.use { token0 =>
+      for {
+        docState <- textDocumentSync.get(uri0)
+        inalyHintsParams = new InlayHintsParams {
+          import docState.*
+          def implicitConversions(): Boolean     = true
+          def implicitParameters(): Boolean      = true
+          def inferredTypes(): Boolean           = true
+          def typeParameters(): Boolean          = true
+          def offset(): Int                      = in.params.range.start.toOffset
+          def endOffset(): Int                   = in.params.range.end.toOffset
+          def text(): String                     = content
+          def token(): scala.meta.pc.CancelToken = token0
+          def uri(): java.net.URI                = uri0
+        }
 
-          result <- pcParamsRequest(in.params, inalyHintsParams)(_.inlayHints)
-        yield Opt(convert[java.util.List[lsp4j.InlayHint], Vector[InlayHint]](result))
+        result <- pcParamsRequest(in.params, inalyHintsParams)(_.inlayHints)
+      } yield Opt(convert[java.util.List[lsp4j.InlayHint], Vector[InlayHint]](result))
+    }
+  }
 
   // def handleInlayHintsRefresh(in: Invocation[Unit, IO]) = IO.pure(null)
 
   private def offsetParamsRequest[Params: PositionWithURI, Result](params: Params)(
       thunk: PresentationCompiler => OffsetParams => CompletableFuture[Result]
-  ): IO[Result] = // TODO Completion on context bound inserts []
+  ): IO[Result] = { // TODO Completion on context bound inserts []
     val uri      = summon[WithURI[Params]].uri(params)
     val position = summon[WithPosition[Params]].position(params)
-    cancelTokens.mkCancelToken.use: token =>
-        for
-          docState <- textDocumentSync.get(uri)
-          offsetParams = toOffsetParams(position, docState, token)
-          result <- pcParamsRequest(params, offsetParams)(thunk)
-        yield result
+    cancelTokens.mkCancelToken.use { token =>
+      for {
+        docState <- textDocumentSync.get(uri)
+        offsetParams = toOffsetParams(position, docState, token)
+        result <- pcParamsRequest(params, offsetParams)(thunk)
+      } yield result
+    }
+  }
 
   private def pcParamsRequest[Params: WithURI, Result, PcParams](params: Params, pcParams: PcParams)(
       thunk: PresentationCompiler => PcParams => CompletableFuture[Result]
-  ): IO[Result] = // TODO Completion on context bound inserts []
+  ): IO[Result] = { // TODO Completion on context bound inserts []
     val uri = summon[WithURI[Params]].uri(params)
-    for
+    for {
       info   <- bspStateManager.get(uri)
       pc     <- pcProvider.get(info)
       result <- IO.fromCompletableFuture(IO(thunk(pc)(pcParams)))
-    yield result
+    } yield result
+  }
 
   def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO]) =
-    for
+    for {
       _    <- textDocumentSync.didSave(in)
       info <- bspStateManager.get(in.params.textDocument.uri.asNio)
       _ <- bspStateManager.bspServer.generic.buildTargetCompile(
@@ -112,13 +121,13 @@ class ServerImpl(
           targets = List(info.buildTarget.id)
         )
       ) // straight to jar here ?? TODO add ID
-    yield ()
+    } yield ()
 
   def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO]) =
-    for
+    for {
       _ <- textDocumentSync.didOpen(in)
       _ <- bspStateManager.didOpen(in)
-    yield ()
+    } yield ()
 
   def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO]) =
     textDocumentSync.didClose(in)
@@ -129,10 +138,10 @@ class ServerImpl(
 
   def handleInitialize(steward: ResourceSupervisor[IO], bspClientDeferred: Deferred[IO, BuildServer])(
       in: Invocation[InitializeParams, IO]
-  ) =
+  ) = {
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
     val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
-    (for
+    (for {
       _         <- sendMessage(in.toClient, "ready to initialise!")
       _         <- importMillBsp(rootPath, in.toClient)
       bspClient <- connectWithBloop(in.toClient, steward)
@@ -150,10 +159,11 @@ class ServerImpl(
       _ <- bspClient.generic.onBuildInitialized()
       _ <- bspClientDeferred.complete(bspClient)
       _ <- bspStateManager.importBuild
-    yield InitializeResult(
+    } yield InitializeResult(
       capabilities = serverCapabilities,
       serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
     )).guaranteeCase(s => logMessage(in.toClient, s"closing initalize with $s"))
+  }
 
   private def serverCapabilities: ServerCapabilities =
     ServerCapabilities(
@@ -165,7 +175,7 @@ class ServerImpl(
       inlayHintProvider = Opt(InlayHintOptions(resolveProvider = Opt(false))),
     )
 
-  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer] =
+  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer] = {
     val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
     val socketFile = temp / s"bloop.socket"
     val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
@@ -196,18 +206,19 @@ class ServerImpl(
       }
       .as(socketFile)
 
-    val bspClientRes = for
+    val bspClientRes = for {
       socketPath <- bspProcess
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
       channel <- FS2Channel
         .resource[IO]()
         .flatMap(_.withEndpoints(bspClientHandler(back)))
       client <- makeBspClient(socketPath.toString, channel, msg => logMessage(back, s"reportin raw: $msg"))
-    yield client
+    } yield client
 
     steward.acquire(bspClientRes)
+  }
 
-  def importMillBsp(rootPath: os.Path, back: Communicate[IO]) =
+  def importMillBsp(rootPath: os.Path, back: Communicate[IO]) = {
     val millExec = "./mill" // TODO if mising then findMillExec()
     ProcessBuilder(millExec, "--import", "ivy:com.lihaoyi::mill-contrib-bloop:", "mill.contrib.bloop.Bloop/install")
       .withWorkingDirectory(fs2.io.file.Path.fromNioPath(rootPath.toNIO))
@@ -226,6 +237,7 @@ class ServerImpl(
           .compile
           .drain
       }
+  }
 
   def sendMessage(back: Communicate[IO], msg: String): IO[Unit] =
     back.notification(
@@ -238,3 +250,4 @@ class ServerImpl(
       requests.window.logMessage,
       LogMessageParams(enumerations.MessageType.Info, message),
     )
+}

@@ -7,10 +7,11 @@ import cats.effect.kernel.Resource
 import cats.effect.kernel.Resource.ExitCase
 import cats.syntax.all.*
 
-trait ResourceSupervisor[F[_]]:
+trait ResourceSupervisor[F[_]] {
   def acquire[A](resource: Resource[F, A]): F[A]
+}
 
-object ResourceSupervisor:
+object ResourceSupervisor {
   def apply[F[_]: Concurrent]: Resource[F, ResourceSupervisor[F]] = Resource
     .makeCase(Ref.of(List.empty[ExitCase => F[Unit]])) { (finalizers, exit) =>
       finalizers.get.flatMap(_.traverse_(_(exit)))
@@ -18,7 +19,7 @@ object ResourceSupervisor:
     .map(Impl(_))
 
   private case class Impl[F[_]: MonadCancelThrow](state: Ref[F, List[ExitCase => F[Unit]]])
-      extends ResourceSupervisor[F]:
+      extends ResourceSupervisor[F] {
 
     def acquire[A](resource: Resource[F, A]): F[A] =
       MonadCancelThrow[F].uncancelable { poll =>
@@ -26,3 +27,5 @@ object ResourceSupervisor:
           state.update(finalizer :: _).as(a)
         }
       }
+  }
+}
