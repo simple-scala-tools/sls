@@ -42,10 +42,10 @@ object SimpleScalaServer extends LangoustineApp {
       syncManager       <- SyncManager.instance(textDocumentSync, bspStateManager).toResource
       cancelTokens      <- IOCancelTokens.instance
       diagnosticManager <- DiagnosticManager.instance.toResource
-      impl = ServerImpl(syncManager, pcProvider, cancelTokens)
+      impl = ServerImpl(syncManager, pcProvider, cancelTokens, diagnosticManager)
     } yield LSPBuilder
       .create[IO]
-      .handleRequest(initialize)(impl.handleInitialize(steward, bspClientDeferred, diagnosticManager))
+      .handleRequest(initialize)(impl.handleInitialize(steward, bspClientDeferred))
       .handleNotification(textDocument.didOpen)(impl.handleDidOpen)
       .handleNotification(textDocument.didClose)(impl.handleDidClose)
       .handleNotification(textDocument.didChange)(impl.handleDidChange)

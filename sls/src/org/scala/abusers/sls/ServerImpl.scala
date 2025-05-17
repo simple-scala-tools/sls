@@ -16,19 +16,24 @@ import org.eclipse.lsp4j
 import org.scala.abusers.pc.IOCancelTokens
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
+import org.scala.abusers.sls.NioConverter.asNio
 
+import java.net.URI
 import java.util.concurrent.CompletableFuture
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
+import scala.meta.pc.CancelToken
 import scala.meta.pc.InlayHintsParams
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompiler
+import scala.meta.pc.VirtualFileParams
 
 class ServerImpl(
     syncManager: SyncManager,
     pcProvider: PresentationCompilerProvider,
     cancelTokens: IOCancelTokens,
+    diagnosticManager: DiagnosticManager,
 ) {
 
   // // TODO: goto type definition with container types
@@ -57,6 +62,12 @@ class ServerImpl(
           .map(definition => convert[lsp4j.Location, aliases.Definition](definition))
       )
     }
+
+  def virtualFileParams(uri0: URI, content: String, token0: CancelToken): VirtualFileParams = new VirtualFileParams {
+    override def text(): String       = content
+    override def token(): CancelToken = token0
+    override def uri(): URI           = uri0
+  }
 
   def handleInlayHints(in: Invocation[InlayHintParams, IO]) = {
     val uri0 = summon[WithURI[InlayHintParams]].uri(in.params)
@@ -115,14 +126,29 @@ class ServerImpl(
 
   def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO]) = syncManager.didClose(in)
 
-  def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]) = syncManager.didChange(in)
+  def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]) = {
+    cancelTokens.mkCancelToken.use { token =>
+      for {
+        _ <- syncManager.didChange(in)
+        uri = in.params.textDocument.uri.asNio
+        textDocument <- syncManager.getDocumentState(uri)
+        info         <- syncManager.getBuildTargetInformation(uri)
+        pc           <- pcProvider.get(info)
+        params = virtualFileParams(uri, textDocument.content, token)
+        diags <- IO.fromCompletableFuture(IO(pc.didChange(params)))
+        langoustineDiags = convert[java.util.List[lsp4j.Diagnostic], Vector[lngst.Diagnostic]](diags)
+        _ <- diagnosticManager.didChange(in, langoustineDiags)
+      } yield diags
+    }.void
+
+    // diagnosticManager.didChange(in)
+  }
 
   def handleInitialized(in: Invocation[InitializedParams, IO]): IO[Unit] = syncManager.importBuild(in.toClient)
 
   def handleInitialize(
       steward: ResourceSupervisor[IO],
       bspClientDeferred: Deferred[IO, BuildServer],
-      diagnosticManager: DiagnosticManager,
   )(
       in: Invocation[InitializeParams, IO]
   ) = {

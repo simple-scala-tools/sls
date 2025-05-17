@@ -1,11 +1,10 @@
 package org.scala.abusers.sls
 
-import langoustine.lsp.Communicate
 import cats.effect.IO
 import langoustine.lsp.*
-import langoustine.lsp.structures.ShowMessageParams
 import langoustine.lsp.structures.LogMessageParams
-
+import langoustine.lsp.structures.ShowMessageParams
+import langoustine.lsp.Communicate
 
 object LoggingUtils {
   def sendMessage(back: Communicate[IO], msg: String): IO[Unit] =
