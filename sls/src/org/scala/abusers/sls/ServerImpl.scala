@@ -176,9 +176,7 @@ class ServerImpl(
     )
 
   private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO]): IO[BuildServer] = {
-    val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
-    val socketFile = temp / s"bloop.socket"
-    val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
+    def bspProcess(socketFile: os.Path) = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
       .spawn[IO]
       .flatMap { bspSocketProc =>
         IO.deferred[Unit].toResource.flatMap { started =>
@@ -207,7 +205,9 @@ class ServerImpl(
       .as(socketFile)
 
     val bspClientRes = for {
-      socketPath <- bspProcess
+      temp <- IO(os.temp.dir(prefix = "sls")).toResource // TODO Investigate possible clashes during reconnection
+      socketFile = temp / s"bloop.socket"
+      socketPath <- bspProcess(socketFile)
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
       channel <- FS2Channel
         .resource[IO]()
