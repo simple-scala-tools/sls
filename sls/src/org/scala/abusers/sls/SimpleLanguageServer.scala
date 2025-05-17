@@ -24,35 +24,33 @@ object BuildServer {
   )
 }
 
-case class State(files: Set[String], bspClient: Deferred[IO, BuildServer])
-// def withBspClient(bspClient: BuildServer) = copy(bspClient = (bspClient))
-
 object SimpleScalaServer extends LangoustineApp {
 
   override def server(args: List[String]): Resource[IO, LSPBuilder[IO]] =
     (for {
-      steward           <- ResourceSupervisor[IO]
-      bspClientDeferred <- Deferred[IO, BuildServer].toResource
-      state             <- IO.ref(State(Set.empty, bspClientDeferred)).toResource
-      lsp               <- myLSP(steward)(using state)
+      steward <- ResourceSupervisor[IO]
+      lsp     <- myLSP(steward)
     } yield lsp).onFinalizeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
-  private def myLSP(steward: ResourceSupervisor[IO])(using stateRef: Ref[IO, State]): Resource[IO, LSPBuilder[IO]] =
+  private def myLSP(steward: ResourceSupervisor[IO]): Resource[IO, LSPBuilder[IO]] =
 
     for {
-      textDocumentSync  <- DocumentSyncManager.instance.toResource
       pcProvider        <- PresentationCompilerProvider.instance.toResource
+      textDocumentSync  <- TextDocumentSyncManager.instance.toResource
       bspClientDeferred <- Deferred[IO, BuildServer].toResource
       bspStateManager   <- BspStateManager.instance(BuildServer.suspend(bspClientDeferred.get)).toResource
+      syncManager       <- SyncManager.instance(textDocumentSync, bspStateManager).toResource
       cancelTokens      <- IOCancelTokens.instance
-      impl = ServerImpl(textDocumentSync, pcProvider, bspStateManager, cancelTokens)
+      diagnosticManager <- DiagnosticManager.instance.toResource
+      impl = ServerImpl(syncManager, pcProvider, cancelTokens)
     } yield LSPBuilder
       .create[IO]
-      .handleRequest(initialize)(impl.handleInitialize(steward, bspClientDeferred))
+      .handleRequest(initialize)(impl.handleInitialize(steward, bspClientDeferred, diagnosticManager))
       .handleNotification(textDocument.didOpen)(impl.handleDidOpen)
       .handleNotification(textDocument.didClose)(impl.handleDidClose)
       .handleNotification(textDocument.didChange)(impl.handleDidChange)
       .handleNotification(textDocument.didSave)(impl.handleDidSave)
+      .handleNotification(initialized)(impl.handleInitialized)
       .handleRequest(textDocument.completion)(impl.handleCompletion)
       .handleRequest(textDocument.hover)(impl.handleHover)
       .handleRequest(textDocument.signatureHelp)(impl.handleSignatureHelp)

@@ -1,7 +1,6 @@
-package org.scala.abusers.sls // TODO package completions are still here when they should not, also we should get whole package completion out of the box
+package org.scala.abusers.sls // TODO also we should get whole package completion out of the box
 
 import cats.effect.*
-import cats.effect.std.MapRef
 import cats.parse.LocationMap
 import cats.syntax.all.*
 import langoustine.lsp.aliases.TextDocumentContentChangeEvent
@@ -9,6 +8,7 @@ import langoustine.lsp.structures.*
 import langoustine.lsp.Invocation
 
 import java.net.URI
+import cats.effect.std.AtomicCell
 
 case class DocumentState(content: String, uri: URI) {
   private lazy val locationMap = LocationMap(content)
@@ -36,13 +36,13 @@ case class DocumentState(content: String, uri: URI) {
   }
 }
 
-object DocumentSyncManager {
-  def instance: IO[DocumentSyncManager] =
-    MapRef.ofScalaConcurrentTrieMap[IO, URI, DocumentState].map(DocumentSyncManager.apply)
+object TextDocumentSyncManager {
+  def instance: IO[TextDocumentSyncManager] =
+    AtomicCell[IO].of(Map[URI, DocumentState]()).map(TextDocumentSyncManager(_))
 }
 
-class DocumentSyncManager(val documents: MapRef[IO, URI, Option[DocumentState]]) {
-  import LspNioConverter.*
+class TextDocumentSyncManager(val documents: AtomicCell[IO, Map[URI, DocumentState]]) {
+  import NioConverter.*
 
   def didOpen(in: Invocation[DidOpenTextDocumentParams, IO]): IO[Unit] =
     getOrCreateDocument(in.params.textDocument.uri.asNio, in.params.textDocument.text.some).void
@@ -51,27 +51,28 @@ class DocumentSyncManager(val documents: MapRef[IO, URI, Option[DocumentState]])
     onTextEditReceived(in.params.textDocument.uri.asNio, in.params.contentChanges)
 
   def didClose(in: Invocation[DidCloseTextDocumentParams, IO]): IO[Unit] =
-    documents.unsetKey(in.params.textDocument.uri.asNio)
+    documents.update(_.removed(in.params.textDocument.uri.asNio))
 
   def didSave(in: Invocation[DidSaveTextDocumentParams, IO]): IO[Unit] =
     getOrCreateDocument(in.params.textDocument.uri.asNio, in.params.text.toOption).void
 
   private def onTextEditReceived(uri: URI, edits: Vector[TextDocumentContentChangeEvent]): IO[Unit] =
     for {
-      _ <- getOrCreateDocument(uri, None)
-      _ <- documents.updateKeyValueIfSet(uri, _.processEdits(edits))
+      doc <- getOrCreateDocument(uri, None)
+      _ <- documents.update(_.updated(uri, doc.processEdits(edits)))
     } yield ()
 
   def get(uri: URI): IO[DocumentState] =
-    documents(uri).get.flatMap(IO.fromOption(_)(IllegalStateException()))
+    documents.get.map(_.get(uri)).flatMap(IO.fromOption(_)(IllegalStateException()))
 
   private def getOrCreateDocument(uri: URI, content: Option[String]): IO[DocumentState] = {
-    val content0 = content.getOrElse("")
-    documents(uri)
-      .updateAndGet {
-        case Some(existing) => Some(existing)
-        case None           => Some(new DocumentState(content0, uri))
+    documents.modify { access =>
+      access.get(uri) match {
+        case Some(doc) => access -> doc
+        case None      =>
+          val newDoc = new DocumentState(content.getOrElse(""), uri)
+          access.updated(uri, newDoc) -> newDoc
       }
-      .map(_.get)
+    }
   }
 }

@@ -16,7 +16,7 @@ trait CommonScalaModule extends ScalaModule with ScalafixModule {
     ) ++ super.repositoriesTask()
   }
 
-  def scalaVersion = "3.7.0"
+  def scalaVersion = "3.7.0" // "3.7.2-RC1-bin-SNAPSHOT"
   def scalacOptions = Seq("-no-indent", "-Wunused:all")
 }
 
