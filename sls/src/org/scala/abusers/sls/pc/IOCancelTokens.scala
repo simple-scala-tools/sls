@@ -11,16 +11,16 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 import scala.meta.pc.CancelToken
 
-trait IOCancelTokens:
+trait IOCancelTokens {
   def mkCancelToken: Resource[IO, CancelToken]
+}
 
-object IOCancelTokens:
+object IOCancelTokens {
   def instance: Resource[IO, IOCancelTokens] = Dispatcher.parallel[IO].map { dispatcher =>
-    new:
+    new {
       def mkCancelToken: Resource[IO, CancelToken] =
         (IO.deferred[Unit], IO.deferred[Unit]).tupled.toResource.flatMap { (completed, cancelRequested) =>
-
-          val token: CancelToken = new:
+          val token: CancelToken = new {
             val onCancelVal: CompletableFuture[java.lang.Boolean] = dispatcher.unsafeToCompletableFuture(
               completed.get
                 .race(cancelRequested.get)
@@ -33,11 +33,14 @@ object IOCancelTokens:
 
             def onCancel(): CompletionStage[java.lang.Boolean] =
               onCancelVal
+          }
 
           Resource.makeCase(IO.pure(token)) {
             case (_, ExitCase.Canceled) => cancelRequested.complete(()).void
             case _                      => completed.complete(()).void
           }
         }
+    }
 
   }
+}

@@ -15,37 +15,38 @@ case class BuildServer(
     java: bsp.java_.JavaBuildServer[IO],
 )
 
-object BuildServer:
+object BuildServer {
   def suspend(client: IO[BuildServer]): BuildServer = BuildServer(
     SmithySuspend.sus(client.map(_.generic)),
     SmithySuspend.sus(client.map(_.jvm)),
     SmithySuspend.sus(client.map(_.scala)),
     SmithySuspend.sus(client.map(_.java)),
   )
+}
 
 case class State(files: Set[String], bspClient: Deferred[IO, BuildServer])
 // def withBspClient(bspClient: BuildServer) = copy(bspClient = (bspClient))
 
-object SimpleScalaServer extends LangoustineApp:
+object SimpleScalaServer extends LangoustineApp {
 
   override def server(args: List[String]): Resource[IO, LSPBuilder[IO]] =
-    (for
+    (for {
       steward           <- ResourceSupervisor[IO]
       bspClientDeferred <- Deferred[IO, BuildServer].toResource
       state             <- IO.ref(State(Set.empty, bspClientDeferred)).toResource
       lsp               <- myLSP(steward)(using state)
-    yield lsp).onFinalizeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
+    } yield lsp).onFinalizeCase(s => IO.consoleForIO.errorln(s"closing with $s"))
 
   private def myLSP(steward: ResourceSupervisor[IO])(using stateRef: Ref[IO, State]): Resource[IO, LSPBuilder[IO]] =
 
-    for
+    for {
       textDocumentSync  <- DocumentSyncManager.instance.toResource
       pcProvider        <- PresentationCompilerProvider.instance.toResource
       bspClientDeferred <- Deferred[IO, BuildServer].toResource
       bspStateManager   <- BspStateManager.instance(BuildServer.suspend(bspClientDeferred.get)).toResource
       cancelTokens      <- IOCancelTokens.instance
       impl = ServerImpl(textDocumentSync, pcProvider, bspStateManager, cancelTokens)
-    yield LSPBuilder
+    } yield LSPBuilder
       .create[IO]
       .handleRequest(initialize)(impl.handleInitialize(steward, bspClientDeferred))
       .handleNotification(textDocument.didOpen)(impl.handleDidOpen)
@@ -57,4 +58,5 @@ object SimpleScalaServer extends LangoustineApp:
       .handleRequest(textDocument.signatureHelp)(impl.handleSignatureHelp)
       .handleRequest(textDocument.definition)(impl.handleDefinition)
       .handleRequest(textDocument.inlayHint)(impl.handleInlayHints)
-    // .handleRequest(textDocument.inlayHint.resolve)(impl.handleInlayHintsResolve)
+  // .handleRequest(textDocument.inlayHint.resolve)(impl.handleInlayHintsResolve)
+}

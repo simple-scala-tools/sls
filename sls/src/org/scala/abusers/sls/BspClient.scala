@@ -45,7 +45,7 @@ def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Un
     )
 
 def bspClientHandler(lspClient: Communicate[IO]): List[Endpoint[IO]] = BSPCodecs.serverEndpoints(
-  new BuildClient[IO]:
+  new BuildClient[IO] {
     private def notify(msg: String) =
       lspClient.notification(
         window.showMessage(
@@ -90,4 +90,5 @@ def bspClientHandler(lspClient: Communicate[IO]): List[Endpoint[IO]] = BSPCodecs
     def onRunPrintStdout(input: PrintParams): IO[Unit] = notify(
       s"handling onRunPrintStdout: $input"
     )
+  }
 )

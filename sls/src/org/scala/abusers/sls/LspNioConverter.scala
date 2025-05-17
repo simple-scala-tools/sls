@@ -4,5 +4,6 @@ import langoustine.lsp.runtime.DocumentUri
 
 import java.net.URI
 
-object LspNioConverter:
+object LspNioConverter {
   extension (documentUri: DocumentUri) def asNio: URI = URI.create(documentUri.value)
+}
