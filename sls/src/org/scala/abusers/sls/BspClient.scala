@@ -44,51 +44,35 @@ def makeBspClient(path: String, channel: FS2Channel[IO], report: String => IO[Un
       )
     )
 
-def bspClientHandler(lspClient: Communicate[IO]): List[Endpoint[IO]] = BSPCodecs.serverEndpoints(
-  new BuildClient[IO] {
-    private def notify(msg: String) =
-      lspClient.notification(
-        window.showMessage(
-          langoustine.lsp.structures
-            .ShowMessageParams(`type` = langoustine.lsp.enumerations.MessageType.Info, message = msg)
+def bspClientHandler(lspClient: Communicate[IO], diagnosticManager: DiagnosticManager): List[Endpoint[IO]] =
+  BSPCodecs.serverEndpoints(
+    new BuildClient[IO] {
+      private def notify(msg: String) =
+        lspClient.notification(
+          window.showMessage(
+            langoustine.lsp.structures
+              .ShowMessageParams(`type` = langoustine.lsp.enumerations.MessageType.Info, message = msg)
+          )
         )
-      )
 
-    def onBuildLogMessage(input: LogMessageParams): IO[Unit] = notify(
-      s"handling onBuildLogMessage: $input"
-    )
+      def onBuildLogMessage(input: LogMessageParams): IO[Unit] = IO.unit
 
-    def onBuildPublishDiagnostics(input: PublishDiagnosticsParams): IO[Unit] = notify(
-      s"handling onBuildPublishDiagnostics: $input"
-    )
+      def onBuildPublishDiagnostics(input: PublishDiagnosticsParams): IO[Unit] =
+        notify(s"We've just got $input") >>
+          diagnosticManager.onBuildPublishDiagnostics(lspClient, input)
 
-    def onBuildShowMessage(input: ShowMessageParams): IO[Unit] =
-      notify(
-        s"handling onBuildShowMessage: $input"
-      )
+      def onBuildShowMessage(input: ShowMessageParams): IO[Unit] = IO.unit
 
-    def onBuildTargetDidChange(input: DidChangeBuildTarget): IO[Unit] = notify(
-      s"handling onBuildTargetDidChange: $input"
-    )
+      def onBuildTargetDidChange(input: DidChangeBuildTarget): IO[Unit] = IO.unit
 
-    def onBuildTaskFinish(input: OnBuildTaskFinishInput): IO[Unit] = notify(
-      s"handling onBuildTaskFinish: $input"
-    )
+      def onBuildTaskFinish(input: OnBuildTaskFinishInput): IO[Unit] = IO.unit
 
-    def onBuildTaskProgress(input: TaskProgressParams): IO[Unit] = notify(
-      s"handling onBuildTaskProgress: $input"
-    )
+      def onBuildTaskProgress(input: TaskProgressParams): IO[Unit] = IO.unit
 
-    def onBuildTaskStart(input: OnBuildTaskStartInput): IO[Unit] = notify(
-      s"handling onBuildTaskStart: $input"
-    )
+      def onBuildTaskStart(input: OnBuildTaskStartInput): IO[Unit] = IO.unit
 
-    def onRunPrintStderr(input: PrintParams): IO[Unit] = notify(
-      s"handling onRunPrintStderr: $input"
-    )
+      def onRunPrintStderr(input: PrintParams): IO[Unit] = IO.unit
 
-    def onRunPrintStdout(input: PrintParams): IO[Unit] = notify(
-      s"handling onRunPrintStdout: $input"
-    )
-  }
-)
+      def onRunPrintStdout(input: PrintParams): IO[Unit] = IO.unit
+    }
+  )

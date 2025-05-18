@@ -4,7 +4,7 @@ import cats.effect.kernel.Resource
 import cats.effect.kernel.Resource.ExitCase
 import cats.effect.std.Dispatcher
 import cats.effect.IO
-import cats.syntax.all.*
+import org.slf4j.LoggerFactory
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
@@ -16,31 +16,31 @@ trait IOCancelTokens {
 }
 
 object IOCancelTokens {
+  val logger = LoggerFactory.getLogger(getClass)
   def instance: Resource[IO, IOCancelTokens] = Dispatcher.parallel[IO].map { dispatcher =>
     new {
       def mkCancelToken: Resource[IO, CancelToken] =
-        (IO.deferred[Unit], IO.deferred[Unit]).tupled.toResource.flatMap { (completed, cancelRequested) =>
+        IO.deferred[Boolean].toResource.flatMap { isCancelled =>
           val token: CancelToken = new {
             val onCancelVal: CompletableFuture[java.lang.Boolean] = dispatcher.unsafeToCompletableFuture(
-              completed.get
-                .race(cancelRequested.get)
-                .map(_.isRight)
+              isCancelled.get.map(res => java.lang.Boolean(res))
             )
 
             def checkCanceled(): Unit =
-              if onCancelVal.isCancelled
-              then throw new CancellationException()
+              if onCancelVal.getNow(false) then {
+                logger.info(s"Throwing CancellationException")
+                throw new CancellationException()
+              }
 
-            def onCancel(): CompletionStage[java.lang.Boolean] =
-              onCancelVal
+            def onCancel(): CompletionStage[java.lang.Boolean] = onCancelVal
           }
 
           Resource.makeCase(IO.pure(token)) {
-            case (_, ExitCase.Canceled) => cancelRequested.complete(()).void
-            case _                      => completed.complete(()).void
+            case (_, ExitCase.Canceled) =>
+              IO(logger.info(s"Cancellation triggered")) >> isCancelled.complete(true).void
+            case _ => isCancelled.complete(false).void
           }
         }
     }
-
   }
 }
