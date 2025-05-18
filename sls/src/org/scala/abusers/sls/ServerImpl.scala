@@ -7,6 +7,7 @@ import cats.effect.IO
 import cats.syntax.all.*
 import fs2.io.process.ProcessBuilder
 import fs2.text
+import ScalaBuildTargetInformation.*
 import jsonrpclib.fs2.FS2Channel
 import langoustine.lsp.*
 import langoustine.lsp.runtime.*
@@ -28,6 +29,7 @@ import scala.meta.pc.InlayHintsParams
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompiler
 import scala.meta.pc.VirtualFileParams
+import org.scala.abusers.pc.ScalaVersion
 
 class ServerImpl(
     syncManager: SyncManager,
@@ -129,17 +131,20 @@ class ServerImpl(
   val handleDidChange: Invocation[DidChangeTextDocumentParams, IO] => IO[Unit] = {
     val debounce = Debouncer(300.millis)
 
+    def isSupported(info: ScalaBuildTargetInformation): Boolean = {
+      import scala.math.Ordered.orderingToOrdered
+      info.scalaVersion > ScalaVersion("3.7.2")
+    }
+
     /**
      * We want to debounce compiler diagnostics as they are expensive to compute and we can't really cancel them
      * as they are triggered by notification and AFAIK, LSP cancellation only works for requests.
      */
-    def pcDiagnostics(in: Invocation[DidChangeTextDocumentParams, IO]): IO[Unit] =
+    def pcDiagnostics(in: Invocation[DidChangeTextDocumentParams, IO], info: ScalaBuildTargetInformation, uri: URI): IO[Unit] =
       cancelTokens.mkCancelToken.use { token =>
-        val uri = in.params.textDocument.uri.asNio
         for {
           _ <- LoggingUtils.logDebug(in.toClient, "Getting PresentationCompiler diagnostics")
           textDocument <- syncManager.getDocumentState(uri)
-          info         <- syncManager.getBuildTargetInformation(uri)
           pc           <- pcProvider.get(info)
           params = virtualFileParams(uri, textDocument.content, token)
           diags <- IO.fromCompletableFuture(IO(pc.didChange(params)))
@@ -151,7 +156,9 @@ class ServerImpl(
     in => for {
       _ <- syncManager.didChange(in)
       _ <- LoggingUtils.logDebug(in.toClient, "Updated DocumentState")
-      _ <- debounce.debounce(pcDiagnostics(in))
+      uri = in.params.textDocument.uri.asNio
+      info         <- syncManager.getBuildTargetInformation(uri)
+      _ <- if isSupported(info) then debounce.debounce(pcDiagnostics(in, info, uri)) else IO.unit
     } yield ()
   }
 
