@@ -126,22 +126,33 @@ class ServerImpl(
 
   def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO]) = syncManager.didClose(in)
 
-  def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]) = {
-    cancelTokens.mkCancelToken.use { token =>
-      for {
-        _ <- syncManager.didChange(in)
-        uri = in.params.textDocument.uri.asNio
-        textDocument <- syncManager.getDocumentState(uri)
-        info         <- syncManager.getBuildTargetInformation(uri)
-        pc           <- pcProvider.get(info)
-        params = virtualFileParams(uri, textDocument.content, token)
-        diags <- IO.fromCompletableFuture(IO(pc.didChange(params)))
-        langoustineDiags = convert[java.util.List[lsp4j.Diagnostic], Vector[lngst.Diagnostic]](diags)
-        _ <- diagnosticManager.didChange(in, langoustineDiags)
-      } yield diags
-    }.void
+  val handleDidChange: Invocation[DidChangeTextDocumentParams, IO] => IO[Unit] = {
+    val debounce = Debouncer(300.millis)
 
-    // diagnosticManager.didChange(in)
+    /**
+     * We want to debounce compiler diagnostics as they are expensive to compute and we can't really cancel them
+     * as they are triggered by notification and AFAIK, LSP cancellation only works for requests.
+     */
+    def pcDiagnostics(in: Invocation[DidChangeTextDocumentParams, IO]): IO[Unit] =
+      cancelTokens.mkCancelToken.use { token =>
+        val uri = in.params.textDocument.uri.asNio
+        for {
+          _ <- LoggingUtils.logDebug(in.toClient, "Getting PresentationCompiler diagnostics")
+          textDocument <- syncManager.getDocumentState(uri)
+          info         <- syncManager.getBuildTargetInformation(uri)
+          pc           <- pcProvider.get(info)
+          params = virtualFileParams(uri, textDocument.content, token)
+          diags <- IO.fromCompletableFuture(IO(pc.didChange(params)))
+          langoustineDiags = convert[java.util.List[lsp4j.Diagnostic], Vector[lngst.Diagnostic]](diags)
+          _ <- diagnosticManager.didChange(in, langoustineDiags)
+        } yield ()
+    }
+
+    in => for {
+      _ <- syncManager.didChange(in)
+      _ <- LoggingUtils.logDebug(in.toClient, "Updated DocumentState")
+      _ <- debounce.debounce(pcDiagnostics(in))
+    } yield ()
   }
 
   def handleInitialized(in: Invocation[InitializedParams, IO]): IO[Unit] = syncManager.importBuild(in.toClient)
