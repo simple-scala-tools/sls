@@ -38,22 +38,22 @@ class ServerImpl(
 
   // // TODO: goto type definition with container types
   def handleCompletion(in: Invocation[CompletionParams, IO]) =
-    offsetParamsRequest(in.params)(_.complete).map { result =>
+    offsetParamsRequest(in)(_.complete).map { result =>
       Opt(convert[lsp4j.CompletionList, lngst.CompletionList](result))
     }
 
   def handleHover(in: Invocation[HoverParams, IO]) =
-    offsetParamsRequest(in.params)(_.hover).map { result =>
+    offsetParamsRequest(in)(_.hover).map { result =>
       Opt.fromOption(result.toScala.map(hoverSig => convert[lsp4j.Hover, lngst.Hover](hoverSig.toLsp())))
     }
 
   def handleSignatureHelp(in: Invocation[SignatureHelpParams, IO]) =
-    offsetParamsRequest(in.params)(_.signatureHelp).map { result =>
+    offsetParamsRequest(in)(_.signatureHelp).map { result =>
       Opt(convert[lsp4j.SignatureHelp, lngst.SignatureHelp](result))
     }
 
   def handleDefinition(in: Invocation[DefinitionParams, IO]) =
-    offsetParamsRequest(in.params)(_.definition).map { result =>
+    offsetParamsRequest(in)(_.definition).map { result =>
       Opt.fromOption(
         result
           .locations()
@@ -95,16 +95,16 @@ class ServerImpl(
 
   // def handleInlayHintsRefresh(in: Invocation[Unit, IO]) = IO.pure(null)
 
-  private def offsetParamsRequest[Params: PositionWithURI, Result](params: Params)(
+  private def offsetParamsRequest[Params: PositionWithURI, Result](in: Invocation[Params, IO])(
       thunk: PresentationCompiler => OffsetParams => CompletableFuture[Result]
   ): IO[Result] = { // TODO Completion on context bound inserts []
-    val uri      = summon[WithURI[Params]].uri(params)
-    val position = summon[WithPosition[Params]].position(params)
+    val uri      = summon[WithURI[Params]].uri(in.params)
+    val position = summon[WithPosition[Params]].position(in.params)
     cancelTokens.mkCancelToken.use { token =>
       for {
         docState <- syncManager.getDocumentState(uri)
         offsetParams = toOffsetParams(position, docState, token)
-        result <- pcParamsRequest(params, offsetParams)(thunk)
+        result <- pcParamsRequest(in.params, offsetParams)(thunk)
       } yield result
     }
   }
