@@ -6,6 +6,8 @@ import cats.effect.kernel.Deferred
 import cats.effect.kernel.Resource
 import cats.effect.IO
 import cats.syntax.all.*
+import fs2.io.file.Files
+import fs2.io.file.Path
 import fs2.io.process.ProcessBuilder
 import fs2.text
 import jsonrpclib.fs2.FS2Channel
@@ -18,6 +20,7 @@ import org.scala.abusers.pc.IOCancelTokens
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.sls.LspNioConverter.asNio
+import util.chaining.*
 
 import java.util.concurrent.CompletableFuture
 import scala.concurrent.duration.*
@@ -26,7 +29,6 @@ import scala.jdk.OptionConverters.*
 import scala.meta.pc.InlayHintsParams
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompiler
-
 class ServerImpl(
     textDocumentSync: DocumentSyncManager,
     pcProvider: PresentationCompilerProvider,
@@ -205,8 +207,14 @@ class ServerImpl(
       .as(socketFile)
 
     val bspClientRes = for {
-      temp <- IO(os.temp.dir(prefix = "sls")).toResource // TODO Investigate possible clashes during reconnection
-      socketFile = temp / s"bloop.socket"
+      temp <- Files[IO]
+        .tempDirectory(
+          dir = None,
+          prefix = "sls",
+          permissions = None,
+        )
+        .map(_.toNioPath.pipe(os.Path(_))) // TODO Investigate possible clashes during reconnection
+      socketFile = temp / "bloop.socket"
       socketPath <- bspProcess(socketFile)
       _          <- Resource.eval(IO.sleep(1.seconds) *> logMessage(back, s"Looking for socket at $socketPath"))
       channel <- FS2Channel
