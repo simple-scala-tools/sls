@@ -67,15 +67,6 @@ object PreparedRequest {
       val in      = _in
       val replyTo = _replyTo
     }
-
-  def apply[X2 <: LSPRequest, F[_]](x: X2) = new UnapplyStage[F](x)
-
-  class UnapplyStage[F[_]](target: LSPRequest) {
-    def unapply(prep: PreparedRequest[F]): Option[(Invocation[prep.x.In, F], Deferred[F, prep.x.Out])] =
-      if prep.x == target then Some((prep.in, prep.replyTo))
-      else None
-  }
-
 }
 
 trait PreparedNotification[F[_]] extends AsyncRequest[F] {
@@ -101,10 +92,11 @@ extension [X <: LSPRequest](r: X) {
 
 class Matcher[X <: LSPRequest, F[_]](val expected: X) {
   def unapply(req: PreparedRequest.Full[X, F]): Option[(Invocation[expected.In, F], Deferred[F, expected.Out])] =
-    if req.x == expected then Some(
-      (req.in.asInstanceOf[Invocation[expected.In, F]], req.replyTo.asInstanceOf[Deferred[F, expected.Out]]) // TODO
-    )
-    else None
+    req match {
+      case PreparedRequest.Full[X, F](`expected`, in: Invocation[expected.In, F], out: Deferred[F, expected.Out]) =>
+        Some((in, out))
+      case _ => None
+    }
 }
 
 object RequestDispatcher {
@@ -117,26 +109,19 @@ object RequestDispatcher {
           .fromQueueUnterminated(changeQueue)
           .evalMap(a => stateRef.get.map(s => (s, a)))
           .broadcastThrough(
-            _.collect { a =>
-              (a: @unchecked) match {
-                case (s, r: PreparedNotification[IO]) => (s, r)
-              }
-            }
+            _.collect { case (s, r: PreparedNotification[IO]) => (s, r) }
               .through(server.handleNotification),
-            _.collect { a =>
-              (a: @unchecked) match {
-                case (s, r: PreparedRequest[IO]) => (s, r.toFull)
-              }
-            }.evalMap { a =>
-              val pattern = textDocument.completion.matcher[IO]
-              a match {
-                case (s, pattern(in, out)) =>
-                  server
-                    .handleCompletion(s -> in)
-                    .flatMap { case (s2, r) => out.complete(r).as(s2) }
-                case other => sys.error(other.toString)
-              }
-            },
+            _.collect { case (s, r: PreparedRequest[IO]) => (s, r.toFull) }
+              .evalMap { a =>
+                val pattern = textDocument.completion.matcher[IO]
+                a match {
+                  case (s, pattern(in, out)) =>
+                    server
+                      .handleCompletion(s -> in)
+                      .flatMap { case (s2, r) => out.complete(r).as(s2) }
+                  case other => sys.error(other.toString)
+                }
+              },
           )
           .evalMap {
             case Some(state) => stateRef.set(state)
