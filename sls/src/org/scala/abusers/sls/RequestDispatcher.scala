@@ -7,6 +7,7 @@ import cats.effect.kernel.Resource
 import cats.effect.std.Queue
 import cats.effect.std.Supervisor
 import cats.effect.IO
+import fs2.Pipe
 import langoustine.lsp.{PreparedNotification => _, PreparedRequest => _, *}
 import langoustine.lsp.requests.*
 import langoustine.lsp.structures.*
@@ -104,35 +105,59 @@ class Matcher[X <: LSPRequest](val expected: X) {
     }
 }
 
+class RequestDispatcherImpl(changeQueue: Queue[IO, AsyncRequest[IO]]) extends RequestDispatcher {
+
+  def handleCompletion(in: Invocation[CompletionParams, IO]): IO[textDocument.completion.Out] =
+    Supervisor[IO].use { sup =>
+      for {
+        reply  <- Deferred[IO, textDocument.completion.Out]
+        _      <- changeQueue.offer(PreparedRequest(textDocument.completion, in, reply, sup))
+        result <- reply.get
+      } yield result
+    }
+
+  def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]): IO[Unit] =
+    changeQueue.offer(PreparedNotification(textDocument.didChange, in))
+
+  def handleInitialized(in: Invocation[InitializedParams, IO]): IO[Unit] =
+    changeQueue.offer(PreparedNotification(initialized, in))
+}
+
 object RequestDispatcher {
 
-  def start(server: ServerImpl2, stateRef: Ref[IO, State]): Resource[IO, RequestDispatcher] =
+  private val textDocumentCompletion = textDocument.completion.matcher
+
+  def start(server: ServerImpl2, stateRef: Ref[IO, State]): Resource[IO, RequestDispatcher] = {
+    val processNotifications: Pipe[IO, (State, AsyncRequest[IO]), Option[State]] = _.collect {
+      case (inState, notification: PreparedNotification[IO]) => (inState, notification)
+    }
+      .through(server.handleNotification)
+
+    val processRequests: Pipe[IO, (State, AsyncRequest[IO]), Option[State]] = _.collect {
+      case (inState, request: PreparedRequest[IO]) => (inState, request.toFull)
+    }
+      .evalMap {
+        case (inState, textDocumentCompletion(req, replyTo, supervisor)) =>
+          supervisor
+            .supervise(server.handleCompletion(inState -> req))
+            .flatMap(_.join)
+            .map {
+              case Succeeded(fa) => fa.flatMap { case (outState, response) => replyTo.complete(response).as(outState) }
+              case _             => IO(Option.empty[State])
+            }
+        case other => sys.error(other.toString)
+      }
+      .evalMap(identity)
+
     for {
       changeQueue <- Resource.eval(Queue.unbounded[IO, AsyncRequest[IO]])
       _ <-
         fs2.Stream
           .fromQueueUnterminated(changeQueue)
-          .evalMap(a => stateRef.get.map(s => (s, a)))
+          .evalMap(request => stateRef.get.map(state => (state, request)))
           .broadcastThrough(
-            _.collect { case (s, r: PreparedNotification[IO]) => (s, r) }
-              .through(server.handleNotification),
-            _.collect { case (s, r: PreparedRequest[IO]) => (s, r.toFull) }
-              .evalMap { a =>
-                val pattern = textDocument.completion.matcher
-                a match {
-                  case (s, pattern(in, out, sup)) =>
-                    sup
-                      .supervise(
-                        server
-                          .handleCompletion(s -> in)
-                          .flatMap { case (s2, r) => out.complete(r).as(s2) }
-                      )
-                      .flatMap(_.join)
-                  case other => sys.error(other.toString)
-                }
-              }
-              .collect { case Succeeded(fa) => fa }
-              .evalMap(fa => fa),
+            processNotifications,
+            processRequests,
           )
           .evalMap {
             case Some(state) => stateRef.set(state)
@@ -142,21 +167,6 @@ object RequestDispatcher {
           .drain
           .background
 
-    } yield new RequestDispatcher {
-
-      def handleCompletion(in: Invocation[CompletionParams, IO]): IO[textDocument.completion.Out] =
-        Supervisor[IO].use { sup =>
-          for {
-            reply  <- Deferred[IO, textDocument.completion.Out]
-            _      <- changeQueue.offer(PreparedRequest(textDocument.completion, in, reply, sup))
-            result <- reply.get
-          } yield result
-        }
-
-      def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]): IO[Unit] =
-        changeQueue.offer(PreparedNotification(textDocument.didChange, in))
-
-      def handleInitialized(in: Invocation[InitializedParams, IO]): IO[Unit] =
-        changeQueue.offer(PreparedNotification(initialized, in))
-    }
+    } yield new RequestDispatcherImpl(changeQueue)
+  }
 }
