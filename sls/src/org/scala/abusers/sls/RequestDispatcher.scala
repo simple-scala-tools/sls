@@ -1,22 +1,16 @@
 package org.scala.abusers.sls
 
 import cats.effect.kernel.Deferred
-import cats.effect.kernel.Fiber
+import cats.effect.kernel.Outcome.Succeeded
 import cats.effect.kernel.Ref
 import cats.effect.kernel.Resource
-import cats.effect.std.MapRef
 import cats.effect.std.Queue
+import cats.effect.std.Supervisor
 import cats.effect.IO
-import cats.syntax.all._
-import fs2.concurrent.SignallingRef
 import langoustine.lsp.{PreparedNotification => _, PreparedRequest => _, *}
 import langoustine.lsp.requests.*
-import langoustine.lsp.runtime.*
 import langoustine.lsp.structures.*
 
-import scala.concurrent.duration._
-
-import _root_.fs2.Pipe
 import _root_.fs2.Stream
 
 trait RequestDispatcher {
@@ -33,10 +27,10 @@ case class State()
 type CommandResult[T]   = IO[(Option[State], T)]
 type NotificationResult = Stream[IO, Option[State]]
 
-trait ServerImpl {
+trait ServerImpl2 {
   def handleCompletion(
-      in: (State, Invocation[CompletionParams, IO])
-  ): CommandResult[Opt[CompletionList]]
+      in: (State, Invocation[textDocument.completion.In, IO])
+  ): CommandResult[textDocument.completion.Out]
 
   def handleNotification(in: Stream[IO, (State, PreparedNotification[IO])]): NotificationResult
 }
@@ -49,8 +43,9 @@ trait PreparedRequest[F[_]] extends AsyncRequest[F] {
   val x: X
   val in: Invocation[x.In, F]
   val replyTo: Deferred[F, Out]
+  val supervisor: Supervisor[F]
 
-  def toFull: PreparedRequest.Full[X, F] = PreparedRequest.Full(x, in, replyTo)
+  def toFull: PreparedRequest.Full[X, F] = PreparedRequest.Full(x, in, replyTo, supervisor)
 }
 object PreparedRequest {
 
@@ -58,14 +53,21 @@ object PreparedRequest {
       x: X,
       in: Invocation[x.In, F],
       replyTo: Deferred[F, x.Out],
+      supervisor: Supervisor[F],
   ) extends AsyncRequest[F]
 
-  def apply[X2 <: LSPRequest, F[_]](_x: X2, _in: Invocation[_x.In, F], _replyTo: Deferred[F, _x.Out]) =
+  def apply[X2 <: LSPRequest, F[_]](
+      _x: X2,
+      _in: Invocation[_x.In, F],
+      _replyTo: Deferred[F, _x.Out],
+      _supervisor: Supervisor[F],
+  ) =
     new PreparedRequest[F] {
       type X = _x.type
-      val x       = _x
-      val in      = _in
-      val replyTo = _replyTo
+      val x          = _x
+      val in         = _in
+      val replyTo    = _replyTo
+      val supervisor = _supervisor
     }
 }
 
@@ -87,21 +89,24 @@ object PreparedNotification {
 }
 
 extension [X <: LSPRequest](r: X) {
-  def matcher[F[_]]: Matcher[X, F] = new Matcher[X, F](r)
+  def matcher: Matcher[X] = new Matcher[X](r)
 }
 
-class Matcher[X <: LSPRequest, F[_]](val expected: X) {
-  def unapply(req: PreparedRequest.Full[X, F]): Option[(Invocation[expected.In, F], Deferred[F, expected.Out])] =
+class Matcher[X <: LSPRequest](val expected: X) {
+  def unapply[F[_]](
+      req: PreparedRequest.Full[X, F]
+  ): Option[(Invocation[expected.In, F], Deferred[F, expected.Out], Supervisor[F])] =
     req match {
-      case PreparedRequest.Full[X, F](`expected`, in: Invocation[expected.In, F], out: Deferred[F, expected.Out]) =>
-        Some((in, out))
+      case PreparedRequest
+            .Full[X, F](`expected`, in: Invocation[expected.In, F], out: Deferred[F, expected.Out], sup) =>
+        Some((in, out, sup))
       case _ => None
     }
 }
 
 object RequestDispatcher {
 
-  def start(server: ServerImpl, stateRef: Ref[IO, State]): Resource[IO, RequestDispatcher] =
+  def start(server: ServerImpl2, stateRef: Ref[IO, State]): Resource[IO, RequestDispatcher] =
     for {
       changeQueue <- Resource.eval(Queue.unbounded[IO, AsyncRequest[IO]])
       _ <-
@@ -113,15 +118,21 @@ object RequestDispatcher {
               .through(server.handleNotification),
             _.collect { case (s, r: PreparedRequest[IO]) => (s, r.toFull) }
               .evalMap { a =>
-                val pattern = textDocument.completion.matcher[IO]
+                val pattern = textDocument.completion.matcher
                 a match {
-                  case (s, pattern(in, out)) =>
-                    server
-                      .handleCompletion(s -> in)
-                      .flatMap { case (s2, r) => out.complete(r).as(s2) }
+                  case (s, pattern(in, out, sup)) =>
+                    sup
+                      .supervise(
+                        server
+                          .handleCompletion(s -> in)
+                          .flatMap { case (s2, r) => out.complete(r).as(s2) }
+                      )
+                      .flatMap(_.join)
                   case other => sys.error(other.toString)
                 }
-              },
+              }
+              .collect { case Succeeded(fa) => fa }
+              .evalMap(fa => fa),
           )
           .evalMap {
             case Some(state) => stateRef.set(state)
@@ -134,11 +145,13 @@ object RequestDispatcher {
     } yield new RequestDispatcher {
 
       def handleCompletion(in: Invocation[CompletionParams, IO]): IO[textDocument.completion.Out] =
-        for {
-          reply  <- Deferred[IO, textDocument.completion.Out]
-          _      <- changeQueue.offer(PreparedRequest(textDocument.completion, in, reply))
-          result <- reply.get
-        } yield result
+        Supervisor[IO].use { sup =>
+          for {
+            reply  <- Deferred[IO, textDocument.completion.Out]
+            _      <- changeQueue.offer(PreparedRequest(textDocument.completion, in, reply, sup))
+            result <- reply.get
+          } yield result
+        }
 
       def handleDidChange(in: Invocation[DidChangeTextDocumentParams, IO]): IO[Unit] =
         changeQueue.offer(PreparedNotification(textDocument.didChange, in))
