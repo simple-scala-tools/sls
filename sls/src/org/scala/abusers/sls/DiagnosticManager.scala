@@ -23,7 +23,8 @@ import java.net.URI
   * This class is reposnobile for holding the state of the diagnostic displayed on the client
   *
   * Proposed heuristic is: On file save we trigger compilation, and this results in notifications being sent from BSP
-  * server. We will keep adding diagnostics, and will clean them only when [[PublishDiagnosticsParams.reset]] Is
+  * server. We will keep adding diagnostics, and will clean them only when [[PublishDiagnosticsParams.reset]] is
+  * set to true.
   *
   * @param publishedDiagnostics
   */
