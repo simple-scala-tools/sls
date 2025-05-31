@@ -5,6 +5,8 @@ import cats.effect.kernel.Deferred
 import cats.effect.kernel.Resource
 import cats.effect.IO
 import cats.syntax.all.*
+import fs2.io.file.Files
+import fs2.io.file.Path
 import fs2.io.process.ProcessBuilder
 import fs2.text
 import ScalaBuildTargetInformation.*
@@ -19,6 +21,7 @@ import LoggingUtils.*
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.sls.NioConverter.asNio
+import util.chaining.*
 
 import java.net.URI
 import java.util.concurrent.CompletableFuture
@@ -206,14 +209,8 @@ class ServerImpl(
       inlayHintProvider = Opt(InlayHintOptions(resolveProvider = Opt(false))),
     )
 
-  private def connectWithBloop(
-      back: Communicate[IO],
-      steward: ResourceSupervisor[IO],
-      diagnosticManager: DiagnosticManager,
-  ): IO[BuildServer] = {
-    val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
-    val socketFile = temp / s"bloop.socket"
-    val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
+  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO], diagnosticManager: DiagnosticManager): IO[BuildServer] = {
+    def bspProcess(socketFile: os.Path) = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
       .spawn[IO]
       .flatMap { bspSocketProc =>
         IO.deferred[Unit].toResource.flatMap { started =>
@@ -242,8 +239,16 @@ class ServerImpl(
       .as(socketFile)
 
     val bspClientRes = for {
-      socketPath <- bspProcess
-      _ <- Resource.eval(IO.sleep(1.seconds) *> back.logMessage(s"Looking for socket at $socketPath"))
+      temp <- Files[IO]
+        .tempDirectory(
+          dir = None,
+          prefix = "sls",
+          permissions = None,
+        )
+        .map(_.toNioPath.pipe(os.Path(_))) // TODO Investigate possible clashes during reconnection
+      socketFile = temp / "bloop.socket"
+      socketPath <- bspProcess(socketFile)
+      _          <- Resource.eval(IO.sleep(1.seconds) *> back.logMessage(s"Looking for socket at $socketPath"))
       channel <- FS2Channel
         .resource[IO]()
         .flatMap(_.withEndpoints(bspClientHandler(back, diagnosticManager)))
