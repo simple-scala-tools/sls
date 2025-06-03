@@ -1,0 +1,34 @@
+<configuration>
+
+  <!-- Appender for dotty.tools.pc -->
+  <appender name="PC_LOG" class="ch.qos.logback.core.FileAppender">
+    <file>./.logs/pc.log</file>
+    <append>false</append>
+    <encoder>
+      <pattern>%date %-5level [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Appender for org.scala.abusers.pc -->
+  <appender name="SLS_LOG" class="ch.qos.logback.core.FileAppender">
+    <file>./.logs/sls.log</file>
+    <append>false</append>
+    <encoder>
+      <pattern>%date %-5level [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Logger for dotty.tools.pc -->
+  <logger name="dotty.tools.pc" level="DEBUG" additivity="false">
+    <appender-ref ref="PC_LOG"/>
+  </logger>
+
+  <!-- Logger for org.scala.abusers.pc -->
+  <logger name="org.scala.abusers" level="DEBUG" additivity="false">
+    <appender-ref ref="SLS_LOG"/>
+  </logger>
+
+  <root level="INFO">
+  </root>
+
+</configuration>

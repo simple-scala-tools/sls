@@ -5,7 +5,7 @@ import langoustine.lsp.structures.HoverParams
 import langoustine.lsp.structures.Position
 import org.eclipse.lsp4j.jsonrpc.json.MessageJsonHandler
 import org.scala.abusers.sls.DocumentState
-import org.scala.abusers.sls.LspNioConverter.asNio
+import org.scala.abusers.sls.NioConverter.asNio
 import upickle.default.*
 
 import java.net.URI

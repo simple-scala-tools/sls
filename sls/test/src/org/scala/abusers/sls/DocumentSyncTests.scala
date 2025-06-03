@@ -3,7 +3,7 @@ package org.scala.abusers.sls
 import langoustine.lsp.aliases.*
 import langoustine.lsp.runtime.*
 import langoustine.lsp.structures.*
-import org.scala.abusers.sls.LspNioConverter.asNio
+import org.scala.abusers.sls.NioConverter.asNio
 import weaver.SimpleIOSuite
 
 object TextDocumentSyncSuite extends SimpleIOSuite {
@@ -33,7 +33,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite {
   loggedTest("applies full document change") { log =>
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
-    for mgr <- DocumentSyncManager.instance
+    for mgr <- TextDocumentSyncManager.instance
     _       <- mgr.didOpen(client.input(open(uri, "Hello!")))
 
     _ <- mgr.didChange(
@@ -59,7 +59,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite {
   loggedTest("applies incremental document change at the beggining") { log =>
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
-    for mgr <- DocumentSyncManager.instance
+    for mgr <- TextDocumentSyncManager.instance
     _       <- mgr.didOpen(client.input(open(uri, "val z = 3")))
 
     _ <- mgr.didChange(
@@ -81,7 +81,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite {
   loggedTest("applies incremental document change at the end") { log =>
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
-    for mgr <- DocumentSyncManager.instance
+    for mgr <- TextDocumentSyncManager.instance
     _       <- mgr.didOpen(client.input(open(uri, "val x = 1\nval y = 2")))
 
     // full document replacement
@@ -102,7 +102,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite {
   loggedTest("applies incremental document change with multi line change") { log =>
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
-    for mgr <- DocumentSyncManager.instance
+    for mgr <- TextDocumentSyncManager.instance
     _       <- mgr.didOpen(client.input(open(uri, "val x = 1\nval y = 2\nval z = 3")))
 
     // full document replacement
@@ -124,7 +124,7 @@ object TextDocumentSyncSuite extends SimpleIOSuite {
   loggedTest("applies incremental document change with selection") { log =>
     val uri    = DocumentUri("/home/Test.scala")
     val client = TestClient(log)
-    for mgr <- DocumentSyncManager.instance
+    for mgr <- TextDocumentSyncManager.instance
     _       <- mgr.didOpen(client.input(open(uri, "val x = 1\nval y = 2\nval z = 3")))
 
     // full document replacement
