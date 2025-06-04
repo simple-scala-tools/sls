@@ -5,6 +5,8 @@ import cats.effect.kernel.Deferred
 import cats.effect.kernel.Resource
 import cats.effect.IO
 import cats.syntax.all.*
+import fs2.io.file.Files
+import fs2.io.file.Path
 import fs2.io.process.ProcessBuilder
 import fs2.text
 import ScalaBuildTargetInformation.*
@@ -15,9 +17,11 @@ import langoustine.lsp.structures.*
 import langoustine.lsp.structures as lngst
 import org.eclipse.lsp4j
 import org.scala.abusers.pc.IOCancelTokens
+import LoggingUtils.*
 import org.scala.abusers.pc.PresentationCompilerDTOInterop.*
 import org.scala.abusers.pc.PresentationCompilerProvider
 import org.scala.abusers.sls.NioConverter.asNio
+import util.chaining.*
 
 import java.net.URI
 import java.util.concurrent.CompletableFuture
@@ -32,7 +36,7 @@ import scala.meta.pc.VirtualFileParams
 import org.scala.abusers.pc.ScalaVersion
 
 class ServerImpl(
-    syncManager: SyncManager,
+    stateManager: StateManager,
     pcProvider: PresentationCompilerProvider,
     cancelTokens: IOCancelTokens,
     diagnosticManager: DiagnosticManager,
@@ -76,7 +80,7 @@ class ServerImpl(
 
     cancelTokens.mkCancelToken.use { token0 =>
       for {
-        docState <- syncManager.getDocumentState(uri0)
+        docState <- stateManager.getDocumentState(uri0)
         inalyHintsParams = new InlayHintsParams {
           import docState.*
           def implicitConversions(): Boolean     = true
@@ -104,7 +108,7 @@ class ServerImpl(
     val position = summon[WithPosition[Params]].position(in.params)
     cancelTokens.mkCancelToken.use { token =>
       for {
-        docState <- syncManager.getDocumentState(uri)
+        docState <- stateManager.getDocumentState(uri)
         offsetParams = toOffsetParams(position, docState, token)
         result <- pcParamsRequest(in.params, offsetParams)(thunk)
       } yield result
@@ -116,17 +120,17 @@ class ServerImpl(
   ): IO[Result] = { // TODO Completion on context bound inserts []
     val uri = summon[WithURI[Params]].uri(params)
     for {
-      info   <- syncManager.getBuildTargetInformation(uri)
+      info   <- stateManager.getBuildTargetInformation(uri)
       pc     <- pcProvider.get(info)
       result <- IO.fromCompletableFuture(IO(thunk(pc)(pcParams)))
     } yield result
   }
 
-  def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO]) = syncManager.didSave(in)
+  def handleDidSave(in: Invocation[DidSaveTextDocumentParams, IO]) = stateManager.didSave(in)
 
-  def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO]) = syncManager.didOpen(in)
+  def handleDidOpen(in: Invocation[DidOpenTextDocumentParams, IO]) = stateManager.didOpen(in)
 
-  def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO]) = syncManager.didClose(in)
+  def handleDidClose(in: Invocation[DidCloseTextDocumentParams, IO]) = stateManager.didClose(in)
 
   val handleDidChange: Invocation[DidChangeTextDocumentParams, IO] => IO[Unit] = {
     val debounce = Debouncer(300.millis)
@@ -143,8 +147,8 @@ class ServerImpl(
     def pcDiagnostics(in: Invocation[DidChangeTextDocumentParams, IO], info: ScalaBuildTargetInformation, uri: URI): IO[Unit] =
       cancelTokens.mkCancelToken.use { token =>
         for {
-          _ <- LoggingUtils.logDebug(in.toClient, "Getting PresentationCompiler diagnostics")
-          textDocument <- syncManager.getDocumentState(uri)
+          _ <- in.toClient.logDebug("Getting PresentationCompiler diagnostics")
+          textDocument <- stateManager.getDocumentState(uri)
           pc           <- pcProvider.get(info)
           params = virtualFileParams(uri, textDocument.content, token)
           diags <- IO.fromCompletableFuture(IO(pc.didChange(params)))
@@ -154,15 +158,15 @@ class ServerImpl(
     }
 
     in => for {
-      _ <- syncManager.didChange(in)
-      _ <- LoggingUtils.logDebug(in.toClient, "Updated DocumentState")
+      _ <- stateManager.didChange(in)
+      _ <- in.toClient.logDebug("Updated DocumentState")
       uri = in.params.textDocument.uri.asNio
-      info         <- syncManager.getBuildTargetInformation(uri)
+      info         <- stateManager.getBuildTargetInformation(uri)
       _ <- if isSupported(info) then debounce.debounce(pcDiagnostics(in, info, uri)) else IO.unit
     } yield ()
   }
 
-  def handleInitialized(in: Invocation[InitializedParams, IO]): IO[Unit] = syncManager.importBuild(in.toClient)
+  def handleInitialized(in: Invocation[InitializedParams, IO]): IO[Unit] = stateManager.importBuild(in.toClient)
 
   def handleInitialize(
       steward: ResourceSupervisor[IO],
@@ -173,10 +177,10 @@ class ServerImpl(
     val rootUri  = in.params.rootUri.toOption.getOrElse(sys.error("what now?"))
     val rootPath = os.Path(java.net.URI.create(rootUri.value).getPath())
     (for {
-      _         <- LoggingUtils.sendMessage(in.toClient, "ready to initialise!")
+      _         <- in.toClient.sendMessage("Ready to initialise!")
       _         <- importMillBsp(rootPath, in.toClient)
       bspClient <- connectWithBloop(in.toClient, steward, diagnosticManager)
-      _         <- LoggingUtils.logMessage(in.toClient, "Connection with bloop estabilished")
+      _         <- in.toClient.logMessage("Connection with bloop estabilished")
       response <- bspClient.generic.buildInitialize(
         InitializeBuildParams(
           displayName = "bloop",
@@ -186,13 +190,13 @@ class ServerImpl(
           capabilities = bsp.BuildClientCapabilities(languageIds = List(bsp.LanguageId("scala"))),
         )
       )
-      _ <- LoggingUtils.logMessage(in.toClient, s"Response from bsp: $response")
+      _ <- in.toClient.logMessage(s"Response from bsp: $response")
       _ <- bspClient.generic.onBuildInitialized()
       _ <- bspClientDeferred.complete(bspClient)
     } yield InitializeResult(
       capabilities = serverCapabilities,
       serverInfo = Opt(InitializeResult.ServerInfo("My first LSP!")),
-    )).guaranteeCase(s => LoggingUtils.logMessage(in.toClient, s"closing initalize with $s"))
+    )).guaranteeCase(s => in.toClient.logMessage(s"closing initalize with $s"))
   }
 
   private def serverCapabilities: ServerCapabilities =
@@ -205,14 +209,8 @@ class ServerImpl(
       inlayHintProvider = Opt(InlayHintOptions(resolveProvider = Opt(false))),
     )
 
-  private def connectWithBloop(
-      back: Communicate[IO],
-      steward: ResourceSupervisor[IO],
-      diagnosticManager: DiagnosticManager,
-  ): IO[BuildServer] = {
-    val temp       = os.temp.dir(prefix = "sls") // TODO Investigate possible clashes during reconnection
-    val socketFile = temp / s"bloop.socket"
-    val bspProcess = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
+  private def connectWithBloop(back: Communicate[IO], steward: ResourceSupervisor[IO], diagnosticManager: DiagnosticManager): IO[BuildServer] = {
+    def bspProcess(socketFile: os.Path) = ProcessBuilder("bloop", "bsp", "--socket", socketFile.toNIO.toString())
       .spawn[IO]
       .flatMap { bspSocketProc =>
         IO.deferred[Unit].toResource.flatMap { started =>
@@ -228,8 +226,8 @@ class ServerImpl(
             .merge(bspSocketProc.stderr)
             .through(text.utf8.decode)
             .through(text.lines)
-            .evalMap(s => LoggingUtils.logMessage(back, s"[bloop] $s"))
-            .onFinalizeCase(c => LoggingUtils.sendMessage(back, s"Bloop process terminated $c"))
+            .evalMap(s => back.logMessage(s"[bloop] $s"))
+            .onFinalizeCase(c => back.sendMessage(s"Bloop process terminated $c"))
             .compile
             .drain
             .background
@@ -241,12 +239,20 @@ class ServerImpl(
       .as(socketFile)
 
     val bspClientRes = for {
-      socketPath <- bspProcess
-      _ <- Resource.eval(IO.sleep(1.seconds) *> LoggingUtils.logMessage(back, s"Looking for socket at $socketPath"))
+      temp <- Files[IO]
+        .tempDirectory(
+          dir = None,
+          prefix = "sls",
+          permissions = None,
+        )
+        .map(_.toNioPath.pipe(os.Path(_))) // TODO Investigate possible clashes during reconnection
+      socketFile = temp / "bloop.socket"
+      socketPath <- bspProcess(socketFile)
+      _          <- Resource.eval(IO.sleep(1.seconds) *> back.logMessage(s"Looking for socket at $socketPath"))
       channel <- FS2Channel
         .resource[IO]()
         .flatMap(_.withEndpoints(bspClientHandler(back, diagnosticManager)))
-      client <- makeBspClient(socketPath.toString, channel, msg => LoggingUtils.logDebug(back, s"reportin raw: $msg"))
+      client <- makeBspClient(socketPath.toString, channel, msg => back.logDebug(s"reporting raw: $msg"))
     } yield client
 
     steward.acquire(bspClientRes)
@@ -267,7 +273,7 @@ class ServerImpl(
           .through(text.lines)
 
         allOutput
-          .evalMap(s => LoggingUtils.logMessage(back, s))
+          .evalMap(back.logMessage)
           .compile
           .drain
       }

@@ -12,6 +12,7 @@ import langoustine.lsp.*
 import langoustine.lsp.structures.*
 import org.scala.abusers.pc.ScalaVersion
 import org.scala.abusers.sls.NioConverter.asNio
+import org.scala.abusers.sls.LoggingUtils.*
 
 import java.net.URI
 
@@ -54,11 +55,11 @@ class BspStateManager(
 
   def importBuild(back: Communicate[IO]) =
     for {
-      _ <- LoggingUtils.logMessage(back, "Starting build import.") // in the future this should be a task with progress
+      _ <- back.logMessage("Starting build import.") // in the future this should be a task with progress
       importedBuild <- getBuildInformation(bspServer)
       _ <- bspServer.generic.buildTargetCompile(CompileParams(targets = importedBuild.map(_.buildTarget.id).toList))
       _ <- targets.set(importedBuild)
-      _ <- LoggingUtils.logMessage(back, "Build import finished.")
+      _ <- back.logMessage("Build import finished.")
     } yield ()
 
   private val byScalaVersion: Ordering[ScalaBuildTargetInformation] = new Ordering[ScalaBuildTargetInformation] {
@@ -122,7 +123,7 @@ class BspStateManager(
         targets0    <- targets.get
         possibleBuildTargets = possibleIds.flatMap(id => targets0.find(_.buildTarget.id == id))
         bestBuildTarget      = possibleBuildTargets.maxBy(_.buildTarget.project.scala.map(_.data.scalaVersion))
-        _ <- LoggingUtils.logDebug(in.toClient, s"Best build target for $uri is ${bestBuildTarget.toString}")
+        _ <- in.toClient.logDebug(s"Best build target for $uri is ${bestBuildTarget.toString}")
       } yield state.updated(uri, bestBuildTarget)
     )
   }

@@ -28,10 +28,7 @@
     <appender-ref ref="SLS_LOG"/>
   </logger>
 
-  <!-- Root logger (optional) -->
   <root level="INFO">
-    <!-- Add a console appender if desired -->
-    <!-- <appender-ref ref="STDOUT"/> -->
   </root>
 
 </configuration>

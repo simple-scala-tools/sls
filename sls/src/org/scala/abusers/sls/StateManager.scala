@@ -10,10 +10,10 @@ import org.scala.abusers.sls.NioConverter.asNio
 
 import java.net.URI
 
-object SyncManager {
+object StateManager {
 
-  def instance(textDocumentSyncManager: TextDocumentSyncManager, bspStateManager: BspStateManager): IO[SyncManager] =
-    Mutex[IO].map(SyncManager(textDocumentSyncManager, bspStateManager, _))
+  def instance(textDocumentSyncManager: TextDocumentSyncManager, bspStateManager: BspStateManager): IO[StateManager] =
+    Mutex[IO].map(StateManager(textDocumentSyncManager, bspStateManager, _))
 
 }
 
@@ -25,7 +25,7 @@ object SyncManager {
   *
   * By unifying this in single manager, we can control what has to be synchronized.
   */
-class SyncManager(
+class StateManager(
     textDocumentSyncManager: TextDocumentSyncManager,
     bspStateManager: BspStateManager,
     mutex: Mutex[IO],
